@@ -1,0 +1,380 @@
+domain: EAS-07
+order: 7
+slug: untrusted-content
+title: Untrusted Content
+essay: 07-untrusted-content-is-data
+summary: >-
+  There is no complete defence against prompt injection at the model layer, so
+  the architecture assumes the model will sometimes be persuaded and limits what
+  a persuaded model can do: every source is classified by trust, no Run holds
+  private data, untrusted exposure and an external channel without a
+  deterministic control between them, and untrusted content is never in a
+  position to give orders.
+
+controls:
+  - id: EAS-07.01
+    title: Trust inventory
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Tool and every context source MUST be classified by
+      `output_trust` (`trusted` or `untrusted`), `data_access` (`none`,
+      `private`, `regulated`) and `egress` (whether it can communicate outside
+      the trust boundary, including by rendering a URL). Content whose author
+      the operator does not control MUST be classified `untrusted`, including
+      data in the operator's own systems that originated outside, inbound
+      messages, user-uploaded documents, web pages and third-party Tool output.
+    rationale: >-
+      Reasoning about injection risk starts from knowing which capabilities a
+      Run holds; the combination of private data, untrusted exposure and
+      external communication cannot be found without this inventory.
+    evidence:
+      declared: >-
+        `tools[].output_trust`, `tools[].data_access` and `tools[].egress` are
+        set for every Tool; every entry in `context.sources[]` is classified.
+      static: >-
+        Every Tool registered in code — including sub-agent, built-in, hosted
+        and MCP Tools — appears in the manifest; classifications are plausible
+        (for example a Tool that fetches URLs, reads inbound email or reads
+        free-text fields entered by customers is not `trusted`; a Tool that
+        posts, sends, calls an external API or writes where others read is
+        `egress: true`).
+      runtime: >-
+        Every `execute_tool` span carries `eas.tool.output_trust` and
+        `eas.tool.egress`, matching the manifest.
+    remediation:
+      scope: local
+      guidance: >-
+        Enumerate Tools from the framework's registry and context sources from
+        retrieval configuration, classify each in the manifest, and default
+        unknown sources to `untrusted`.
+    components: [tool-gateway, context-service]
+    see_also: [EAS-07.02, EAS-03.01]
+    section: the-dangerous-combination
+
+  - id: EAS-07.02
+    title: No ungated lethal combination
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      A Run MUST NOT hold access to private or regulated data, exposure to
+      untrusted content, and the ability to communicate externally without a
+      deterministic control between them. Where a Workflow needs all three,
+      the external channel MUST be constrained by a deterministic control
+      (for example replies only to the verified sender in a structured format,
+      a taint rule requiring approval, or quarantine of the untrusted content)
+      and unusual cases MUST go to a person. Rendering a link or image whose
+      URL the model can influence counts as external communication.
+    rationale: >-
+      An agent with all three can be turned into an exfiltration tool: the
+      untrusted content carries the instructions, the private data is the
+      payload and the external channel is the exit. Removing or gating any one
+      of them makes the attack fail.
+    evidence:
+      declared: >-
+        From `tools[]` and `context.sources[]`, for each Workflow: P = any Tool
+        with `data_access` of `private` or `regulated`; U = any Tool with
+        `output_trust: untrusted` or any untrusted context source or Run input;
+        E = any Tool with `egress: true`. Where P, U and E all hold, at least
+        one `policies[]` entry with `enforced_at` of `gateway`, `output` or
+        `network` names the gating control.
+      static: >-
+        Procedure. (1) For each Workflow, determine the set of Tools reachable
+        within one Run: the root agent's Tools plus those of every sub-agent,
+        handoff target or nested workflow that executes under the same Run
+        (sharing its Credential or context). (2) Add the context sources and
+        Run inputs (inbound messages, uploads) that enter any of those agents.
+        (3) Add an implicit egress Tool if any model output is rendered as
+        markdown, HTML, links or images by a client, unless the renderer
+        restricts URLs to an allowlist. (4) Evaluate P, U and E over the union;
+        splitting the three across sub-agents of the same Run does not remove
+        the combination unless their contexts and Credentials are actually
+        separate. (5) If all three hold, locate the deterministic control
+        between untrusted exposure and egress — a taint rule (EAS-07.03), a
+        recipient or destination constraint in the policy gate, quarantine
+        (EAS-07.09), or plan-before-read. No such control is a finding.
+      runtime: >-
+        No Run contains an `execute_tool` span with `eas.tool.egress = true`
+        after `eas.run.tainted = true` unless that ToolRequest is preceded by an
+        `eas.policy` span whose `eas.policy.rule_id` identifies a gating rule.
+      attested: For this Workflow, if a retrieved document instructed the agent to send customer data to an outside address, which deterministic control would stop it?
+    remediation:
+      scope: local
+      guidance: >-
+        Remove the capability not required by the task (often the send Tool),
+        or add a gate: constrain recipients and destinations to verified
+        targets from the system of record, and require approval for egress
+        once the Run is tainted.
+    hooks: [tool.before, tool.after]
+    components: [policy-engine, tool-gateway]
+    see_also: [EAS-07.03, EAS-07.04, EAS-07.09, EAS-04.02]
+    section: the-dangerous-combination
+
+  - id: EAS-07.03
+    title: Run-level taint
+    level: L2
+    applies: Workflows with any untrusted Tool or context source.
+    requirement: >-
+      When output from an untrusted Tool or context source enters the context
+      of any agent in a Run, the Run MUST be marked tainted, and taint MUST NOT
+      be reset within the Run. Once tainted, high-risk capabilities — external
+      sends, data exports, permission changes and large financial actions —
+      MUST require human approval or be denied for the rest of the Run. Taint
+      MAY be tracked at a finer grain (specific values) provided high-risk
+      actions influenced by tainted values are equally restricted.
+    rationale: >-
+      Even coarse, whole-Run taint removes most of the risk at little cost,
+      because most Runs that read untrusted content do not need to take
+      high-risk actions afterwards.
+    evidence:
+      static: >-
+        A `tool.after` hook (or retrieval wrapper) sets taint from the source's
+        classification; the policy gate reads taint from the Run and maps
+        high-risk Tools to `escalate` or `deny` when tainted; taint is carried
+        across sub-agents within the Run.
+      runtime: >-
+        No `execute_tool` span with `eas.tool.egress = true` or
+        `eas.tool.effect_class = irreversible` and `eas.run.tainted = true`
+        exists without a preceding `eas.policy` span whose decision is
+        `escalate`, or an `eas.intent` span with `eas.intent.approval = human`.
+    remediation:
+      scope: local
+      guidance: >-
+        Mark the Run tainted in `tool.after` based on the Tool's
+        `output_trust`, and add a gate rule that escalates high-risk Tools on
+        tainted Runs.
+    hooks: [tool.after, tool.before, memory.write]
+    components: [policy-engine, orchestrator, approval-service]
+    see_also: [EAS-07.02, EAS-04.02, EAS-03.07]
+    section: patterns-that-work
+
+  - id: EAS-07.04
+    title: Least-privilege tool sets
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Each Workflow MUST expose only the Tools its task requires; read access
+      unless writes are required; reversible writes unless irreversible ones are
+      required. An agent whose task ends at a draft for review MUST NOT have a
+      send Tool. Actions SHOULD carry rate limits, budgets and approvals tiered
+      by risk.
+    rationale: >-
+      Excessive agency gives a successful injection more to work with; least
+      privilege applied to the tool set limits what a persuaded model can do.
+    evidence:
+      declared: "`tools[]` with `effect_class`, `egress` and `approval` for each Tool, read against the Workflow's `success_definition`."
+      static: >-
+        For each Tool with `effect_class` other than `none` or with
+        `egress: true`, a step of the Workflow's task requires it; generic
+        Tools (shell, arbitrary HTTP, arbitrary query) where a narrower one
+        would serve are findings; draft-only Workflows have no send or publish
+        Tool.
+      runtime: Tools declared for a Workflow but never invoked across the sample are reported as removal candidates.
+      attested: For each write, irreversible or egress Tool, which part of the task needs it?
+    remediation:
+      scope: local
+      guidance: Remove unused and over-broad Tools; replace generic Tools with narrow, typed ones; route sends through a draft and approval flow.
+    components: [tool-gateway]
+    see_also: [EAS-03.01, EAS-03.08, EAS-05.05]
+    section: least-privilege-applied-to-tools
+
+  - id: EAS-07.05
+    title: Egress control
+    level: L2
+    applies: All agent runtimes.
+    requirement: >-
+      Agent runtimes MUST NOT have direct internet access. Outbound traffic
+      MUST pass through a proxy that allows only the model providers and
+      registered Tool endpoints.
+    rationale: >-
+      If an injected instruction persuades the agent to send data to an
+      unknown address, the network refuses, even when everything above it has
+      been fooled.
+    evidence:
+      declared: "`policies[]` entry with `enforced_at: network` describing the allowlist."
+      static: >-
+        Network policy or security groups deny default egress from the runtime;
+        proxy configuration holds an allowlist that matches the declared model
+        providers and Tool endpoints; Tools that fetch arbitrary URLs go through
+        the same proxy.
+      runtime: Denied egress attempts are logged by the proxy and appear as `eas.policy` spans with `eas.policy.point = network`.
+      attested: From inside the runtime, what happens on a request to an address not on the allowlist?
+    remediation:
+      scope: structural
+      guidance: Place the runtime in a network segment with no default route to the internet and an egress proxy with an allowlist derived from the manifest.
+    components: [egress-proxy]
+    see_also: [EAS-04.06]
+    section: patterns-that-work
+
+  - id: EAS-07.06
+    title: Third-party tool supply chain
+    level: L2
+    applies: Workflows using Tools with `source` of `third_party` or `mcp`.
+    requirement: >-
+      Tool descriptions and schemas from third-party servers MUST be reviewed
+      when a server is approved, and a hash of each MUST be recorded. A server
+      whose descriptions or schemas change MUST NOT be used until they are
+      reviewed again. Each agent MUST see only the Tools of servers it needs.
+      Agents MUST connect only to approved servers, through a gateway that logs
+      and inspects traffic, using tokens bound to the specific audience and
+      never passed through from one service to another.
+    rationale: >-
+      Tool descriptions are placed in the model's context, so a malicious or
+      compromised server can poison them or shadow other servers' Tools, and a
+      server that was benign at review can change later. The defences are
+      supply-chain defences.
+    evidence:
+      declared: "`tools[].source{type, server, description_sha256}` for every third-party Tool."
+      static: >-
+        At connection or load time, descriptions and schemas are hashed and
+        compared with the pinned values, and a mismatch disables the server;
+        each agent's Tool list is an explicit subset rather than all connected
+        servers; server URLs come from an approved list routed via the gateway;
+        tokens are requested per audience and not forwarded.
+      attested: Who reviews a new or changed third-party Tool server, and what happens automatically when its descriptions change?
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce a tool gateway that holds the approved server list and pinned
+        description hashes, filters Tools per agent, and handles audience-bound
+        authorisation.
+    components: [tool-gateway, identity-broker]
+    see_also: [EAS-07.08, EAS-10.01]
+    section: the-channels-people-forget
+
+  - id: EAS-07.07
+    title: Memory provenance
+    level: L2
+    applies: Workflows with `memory.enabled`.
+    requirement: >-
+      Every MemoryEntry MUST record the Run that wrote it, its source and
+      whether that source was trusted. Entries written by a tainted Run or
+      derived from untrusted content MUST be stored with lower trust or not
+      stored at all, and a Run that reads lower-trust memory MUST treat it as
+      untrusted content.
+    rationale: >-
+      If later Runs trust what is remembered, an injection becomes persistent:
+      a malicious email processed today writes a "fact" that a Run next week
+      acts on, long after anyone would connect the two.
+    evidence:
+      declared: "`memory.provenance` enabled and `memory.untrusted_policy` set to `exclude` or `downgrade`."
+      static: >-
+        A `memory.write` hook attaches writer Run, source and trust and applies
+        the untrusted policy based on Run taint; memory reads mark low-trust
+        entries as untrusted ContextItems (and taint the reading Run).
+    remediation:
+      scope: local
+      guidance: Wrap memory writes in a hook that records provenance from the Run and downgrades or drops entries from tainted Runs.
+    hooks: [memory.write]
+    components: [memory-store]
+    see_also: [EAS-07.03, EAS-12.07]
+    section: the-channels-people-forget
+
+  - id: EAS-07.08
+    title: Injection regression suite
+    level: L2
+    applies: All Workflows with any untrusted Tool or context source.
+    requirement: >-
+      A corpus of injection attempts — direct and indirect, encoded,
+      multi-turn, and delivered through documents, Tool outputs and Tool
+      descriptions — MUST be run as a regression suite on every change to a
+      prompt, model, Tool or policy. Attack success rate MUST be tracked by
+      category, and an increase MUST block the release as a functional
+      regression would.
+    rationale: >-
+      No defence is complete, so testing must be continuous and treated as
+      part of the release gate.
+    evidence:
+      declared: "`evaluation.gates[]` includes an injection attack-success-rate gate referencing the corpus in `evaluation.suite`."
+      static: >-
+        The corpus exists, is versioned and covers each delivery channel the
+        Workflow has; CI runs it on changes to prompts, models, Tool
+        definitions and policies; results are reported per category with a
+        blocking threshold.
+      attested: When did an injection regression last block a release, and what changed?
+    remediation:
+      scope: local
+      guidance: Seed a corpus from public injection datasets and past incidents, run it in the evaluation pipeline, and gate on per-category attack success rate.
+    components: [eval-platform, release-control]
+    see_also: [EAS-10.07, EAS-07.11]
+    section: testing-as-a-programme
+
+  - id: EAS-07.09
+    title: Constrained control flow for high-risk Workflows
+    level: L3
+    applies: Workflows that read untrusted content and send messages, change records or move money.
+    requirement: >-
+      Such Workflows MUST ensure untrusted content can flow only as data, by
+      at least one of: (a) plan-before-read — the Tools to call, their order
+      and their targets are fixed from trusted input before any untrusted
+      content is read; or (b) quarantine — untrusted content is processed by a
+      separate ModelCall with no Tools and no access to sensitive data, which
+      returns a tightly constrained, schema-validated result, and the
+      privileged part of the system never sees the raw text.
+    rationale: >-
+      If control flow is derived only from trusted input, untrusted content can
+      influence what is written but cannot add a Tool call or change a
+      recipient; an injection reduced to a few validated fields has little room
+      to carry instructions.
+    evidence:
+      static: >-
+        For plan-before-read: the Workflow's Tool sequence and targets are
+        determined in code or by a ModelCall that precedes any untrusted read,
+        and later ModelCalls fill content only. For quarantine: the ModelCall
+        receiving untrusted text has no Tools bound and no private context; its
+        output schema uses enumerations and bounded fields; only the validated
+        structure reaches the privileged agent.
+      attested: Which pattern does this Workflow use, and at which point does untrusted content enter it?
+    remediation:
+      scope: structural
+      guidance: >-
+        Restructure the Workflow as a fixed workflow with model-filled content
+        slots, or insert a tool-less, schema-constrained extraction step in front
+        of the privileged agent.
+    components: [orchestrator, model-gateway]
+    see_also: [EAS-07.02, EAS-01.01]
+    section: patterns-that-work
+
+  - id: EAS-07.10
+    title: Production injection detection
+    level: L3
+    applies: Workflows in production with any untrusted Tool or context source.
+    requirement: >-
+      Production MUST include honeytokens (for example a contact that must
+      never be emailed, a document that must never be read) that raise an alert
+      when touched, and MUST alert on spikes in policy rejections.
+    rationale: >-
+      Because no defence is complete, detection in production surfaces
+      attempts that tests missed; spikes in policy rejections are a signal, not
+      noise.
+    evidence:
+      static: Honeytoken records exist in the data reachable by the Workflow, with deny rules and alerts bound to them; alert rules on rejection rate per Workflow.
+      runtime: The rate of `eas.policy` spans with `eas.policy.decision = deny` per Workflow is monitored with an alert threshold; honeytoken access produces an alert.
+      attested: When did a honeytoken or rejection-spike alert last fire, and who responded?
+    remediation:
+      scope: local
+      guidance: Plant honeytokens in each data domain the agent can read and contact, add deny rules that alert, and alert on deny-rate anomalies.
+    components: [telemetry-pipeline, policy-engine]
+    see_also: [EAS-04.05]
+    section: testing-as-a-programme
+
+  - id: EAS-07.11
+    title: Coverage mapped to OWASP LLM Top 10 and MITRE ATLAS
+    level: L3
+    applies: All Workflows assessed at L3.
+    requirement: >-
+      Injection and security test coverage MUST be mapped to the OWASP Top 10
+      for LLM applications and MITRE ATLAS, showing which risks and techniques
+      are tested and which are not.
+    rationale: >-
+      Mapping coverage to these frameworks gives security reviewers a shared
+      vocabulary for what has and has not been tested.
+    evidence:
+      static: A maintained mapping from test cases and controls to OWASP LLM Top 10 entries and ATLAS techniques, with gaps listed.
+      attested: Which OWASP LLM Top 10 risks and ATLAS techniques are not covered by tests, and why?
+    remediation:
+      scope: local
+      guidance: Tag each corpus case and control with framework identifiers and generate the coverage table from the tags.
+    components: [eval-platform]
+    see_also: [EAS-07.08]
+    section: testing-as-a-programme

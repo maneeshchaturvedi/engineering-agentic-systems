@@ -1,0 +1,355 @@
+domain: EAS-08
+order: 8
+slug: context
+title: Context Budget
+essay: 08-context-is-a-budget
+summary: >-
+  The model receives the smallest context sufficient for the task, assembled
+  deliberately: each kind of fact comes from its natural source, every
+  ContextItem is sized and explicitly partial when truncated, every fact
+  carries the time it was true as of, and whether the context was sufficient
+  is measured.
+
+controls:
+  - id: EAS-08.01
+    title: Explicit truncation and pagination
+    level: L1
+    applies: All Tools whose output is returned to the model.
+    requirement: >-
+      A Tool response that would exceed the Tool's output limit MUST either be
+      summarised, with the details available through a further request, or be
+      paginated with a cursor the model can use to request more. Any response
+      that is partial MUST say so in its content, and the resulting
+      ContextItem MUST be marked `truncated`. Silent truncation (cutting the
+      output with no indication) MUST NOT occur.
+    rationale: >-
+      A model that is not told a result is partial will mistake a subset for
+      the whole. Unbounded output is both a context bug, crowding out
+      everything else, and a load bug on the systems behind the Tool.
+    evidence:
+      declared: "`tools[].output_limit_tokens` is set for every Tool (see EAS-05.06)."
+      static: >-
+        Each Tool, or a shared `tool.after` hook, handles over-limit output by
+        summarising or by returning a page plus a continuation cursor, and
+        adds an explicit partial marker (for example `truncated: true`,
+        `total_count`, `next_cursor`) to the response returned to the model.
+        Slicing a string or list to a size with no marker is a finding.
+        Limits are measured in tokens, not rows.
+      runtime: >-
+        No `execute_tool` span has `eas.tool.output_tokens` above the Tool's
+        declared limit; spans whose raw output exceeded the limit carry
+        `eas.tool.output_truncated = true`; in sampled captured payloads, every
+        truncated output contains an explicit partial marker.
+    remediation:
+      scope: local
+      guidance: >-
+        Implement truncation once in a shared `tool.after` hook that counts
+        tokens, cuts at the limit, and appends a structured partial marker and
+        cursor; add cursor parameters to list and search Tools.
+    hooks: [tool.after]
+    components: [tool-gateway]
+    see_also: [EAS-05.06]
+    section: every-tool-has-a-size-limit
+
+  - id: EAS-08.02
+    title: Structured facts via structured lookups
+    level: L1
+    applies: All Workflows that give the model facts about specific entities (plan, status, score, configuration).
+    requirement: >-
+      Facts that have exactly one correct current value in a system of record
+      MUST be supplied to the model by a keyed, structured lookup against
+      that record or its snapshot, and MUST NOT be obtained by similarity
+      search over embedded copies. Similarity retrieval SHOULD be reserved for
+      unstructured ContextItems (documents, notes, manuals, past
+      conversations).
+    rationale: >-
+      Similarity search finds passages that discuss something; it is the
+      wrong tool for answering "what is this customer's current plan?", which
+      has exactly one correct answer sitting in a database.
+    evidence:
+      declared: >-
+        `context.sources[]` lists each source with its `kind`; sources of kind
+        `slow` or `fresh` are backed by keyed lookups, and only sources of
+        kind `unstructured` are backed by a vector index.
+      static: >-
+        Inspect what is written to vector indexes: embedding entity records,
+        account fields, statuses or scores is a finding. Entity facts reach
+        the context through Tools or context-service calls keyed by entity
+        identifier.
+      runtime: >-
+        ModelCall spans show entity facts under `eas.context.tokens.slow` or
+        `eas.context.tokens.fresh`, not under `eas.context.tokens.unstructured`.
+    remediation:
+      scope: local
+      guidance: >-
+        Replace similarity retrieval of entity facts with a keyed lookup Tool
+        or snapshot read; remove structured records from the embedding
+        pipeline.
+    components: [context-service]
+    section: the-wrong-primitive
+
+  - id: EAS-08.03
+    title: No arbitrary generated queries against production stores
+    level: L1
+    applies: >-
+      Workflows at rung `agent` or `multi_agent` that act without a person
+      reading each query result. Analyst assistants whose output a person
+      reviews are out of scope.
+    requirement: >-
+      An autonomous agent MUST NOT be able to compose and execute arbitrary
+      queries (for example generated SQL) against production data stores.
+      Data access MUST go through parameterised query templates: a fixed set
+      of queries the Tool knows how to run efficiently, with the model
+      supplying only parameters.
+    rationale: >-
+      Generated queries from an unsupervised agent mean unbounded cost,
+      unpredictable query plans that can harm shared systems, and a path for
+      injected instructions to reach the database. Templates keep most of
+      the flexibility with none of these risks.
+    evidence:
+      declared: >-
+        No entry in `tools[]` accepts a free-form query language string as an
+        argument.
+      static: >-
+        Tool input schemas contain typed parameters only; Tool implementations
+        bind parameters into fixed query text. Any Tool that passes a
+        model-supplied string to a query engine, or concatenates model output
+        into query text, is a finding.
+      attested: Can any autonomous Workflow cause a query to run against a production store whose text was not written by an engineer?
+    remediation:
+      scope: local
+      guidance: >-
+        Inventory the questions the agent actually asks of the store and
+        replace the free-form query Tool with one parameterised Tool (or
+        template) per question, each with bounded result size.
+    hooks: [tool.before]
+    components: [tool-gateway]
+    see_also: [EAS-02.03, EAS-07.01]
+    section: the-wrong-primitive
+
+  - id: EAS-08.04
+    title: Cache-friendly prompt structure
+    level: L2
+    applies: All Workflows making repeated ModelCalls with shared instructions.
+    requirement: >-
+      Static ContextItems (system instructions, policies, tool definitions)
+      MUST be placed in a fixed prefix at the start of the prompt, identical
+      across Runs of the same Workflow version, ahead of any per-Run or
+      per-Step content, so that provider prompt caching can apply.
+    rationale: >-
+      Static context is the same for every Run of a Workflow; in a fixed
+      prefix it can be cached by the provider and charged at a fraction of
+      the usual price on repeated calls.
+    evidence:
+      static: >-
+        Prompt assembly orders static content first and contains no per-Run
+        values (timestamps, identifiers, user data) inside the static prefix;
+        provider cache controls are enabled where the provider requires them.
+      runtime: >-
+        `eas.context.tokens.static` is constant across ModelCalls of a
+        Workflow version; provider-reported cached input tokens are non-zero
+        on repeated calls where the provider reports them.
+    remediation:
+      scope: local
+      guidance: >-
+        Restructure prompt templates so that all static content precedes
+        variable content, move dynamic values out of the system prompt, and
+        enable provider caching.
+    hooks: [model.before]
+    components: [context-service, model-gateway]
+    section: not-all-context-is-the-same
+
+  - id: EAS-08.05
+    title: Precomputed snapshots for slow-changing facts
+    level: L2
+    applies: Workflows that use scores, classifications, profiles or configuration produced by batch pipelines.
+    requirement: >-
+      Slow-changing facts MUST be read from precomputed snapshots (compact
+      per-entity documents refreshed when the producing pipeline publishes)
+      and MUST NOT be recomputed at query time by a Tool. Agents MUST read the
+      same precomputed results as the rest of the product. Deep analytical
+      requests (large aggregations or joins over long histories) SHOULD be
+      explicit, run within strict limits, preferably asynchronously, and
+      return a summary rather than the raw result.
+    rationale: >-
+      Re-aggregating a month of activity to recompute a score a batch job
+      produced last night is wasteful at best and inconsistent at worst,
+      because the agent's figure may disagree with the one the product shows.
+    evidence:
+      declared: "`context.sources[]` includes sources of kind `slow` naming the snapshot each reads from."
+      static: >-
+        No Tool reimplements an aggregation or scoring computation that an
+        existing pipeline already produces; slow facts are read from the
+        pipeline's published output. Analytical Tools enforce row, time and
+        cost limits.
+      attested: For each score or classification the agent uses, which pipeline produces it, and does the agent read that output or compute its own?
+    remediation:
+      scope: structural
+      guidance: >-
+        Publish per-entity snapshot documents from the existing pipelines and
+        replace query-time aggregation Tools with snapshot reads.
+    components: [context-service]
+    see_also: [EAS-08.06]
+    section: not-all-context-is-the-same
+
+  - id: EAS-08.06
+    title: Freshness labels and SLAs
+    level: L2
+    applies: All Workflows whose decisions depend on facts that change over time.
+    requirement: >-
+      Every ContextItem carrying a fact MUST include its `as_of` time, visible
+      to the model. Freshness requirements MUST be defined per kind of
+      context and per kind of decision rather than as one global target. The
+      platform MUST refuse or flag an action whose required inputs are older
+      than that action tolerates, and stale context MUST be observable and
+      alert the owner of the producing pipeline.
+    rationale: >-
+      Labels let the model account for gaps, let evaluation separate bad data
+      from bad reasoning (which have different fixes), and turn staleness into
+      a pipeline alert instead of an agent quietly acting on yesterday's
+      information.
+    evidence:
+      declared: "`context.sources[].freshness_sla_s` is set for every source of kind `slow` or `fresh`."
+      static: >-
+        Tool and context-service responses include an `as_of` field for each
+        fact; a check before consequential ToolRequests compares input ages
+        against the action's freshness requirement and denies or escalates.
+      runtime: >-
+        ModelCall spans carry `eas.context.stale_items`; no `execute_tool` span
+        with `eas.tool.effect_class` other than `none` follows a ModelCall with
+        `eas.context.stale_items > 0` in the same Step without an `eas.policy`
+        span whose decision is `deny` or `escalate`.
+      attested: Who is alerted when a context source exceeds its freshness SLA?
+    remediation:
+      scope: local
+      guidance: >-
+        Add `as_of` to every Tool response in a `tool.after` hook, declare
+        freshness SLAs per source, and add a freshness rule to the policy gate
+        for consequential Tools.
+    hooks: [tool.after, tool.before]
+    components: [context-service, policy-engine, telemetry-pipeline]
+    section: freshness-is-part-of-the-data
+
+  - id: EAS-08.07
+    title: Long-run context management
+    level: L2
+    applies: Workflows at rung `agent` or `multi_agent` whose Runs can exceed a small number of Steps.
+    requirement: >-
+      The context window MUST be managed as working memory, not as a log of
+      the Run. Workflows MUST apply at least one of: compaction (periodically
+      summarising older history while retaining decisions, open questions,
+      identifiers and commitments); sub-agent isolation (exploratory work in a
+      separate agent that returns only a compact result); or structured notes
+      (important findings written to durable state and re-read when needed).
+    rationale: >-
+      Each Step adds tool results and reasoning, and a fifty-Step Run can
+      accumulate far more than the model can use well. What needs to persist
+      should persist somewhere designed for it.
+    evidence:
+      static: >-
+        A compaction step, sub-agent delegation for exploratory work, or a
+        notes mechanism backed by durable state exists in the orchestration;
+        compaction prompts or code preserve decisions, identifiers and
+        commitments explicitly.
+      runtime: >-
+        The sum of `eas.context.tokens.*` per ModelCall does not grow without
+        bound with Step count; in long Runs it stays below a declared ceiling.
+    remediation:
+      scope: local
+      guidance: >-
+        Add a `model.before` check that triggers compaction above a context
+        threshold, and move exploratory search into a sub-agent with a
+        compact return contract.
+    hooks: [model.before, delegate]
+    components: [orchestrator, context-service, state-store]
+    see_also: [EAS-05.02]
+    section: context-across-long-runs
+
+  - id: EAS-08.08
+    title: Relevant tool definitions only
+    level: L2
+    applies: Workflows exposing many Tools.
+    requirement: >-
+      The tool definitions included in a ModelCall SHOULD be limited to the
+      Tools relevant to the current Step, so that tool definitions are
+      budgeted like any other ContextItem. Selection MUST be deterministic
+      and SHOULD preserve a stable prompt prefix (see EAS-08.04).
+    rationale: >-
+      The goal is the smallest context sufficient for the task; irrelevant
+      material, including unused tool definitions, costs on every call and
+      makes relevant facts more likely to be missed.
+    evidence:
+      static: >-
+        Tool sets are selected per Step or per phase by orchestration code,
+        not passed wholesale to every ModelCall.
+      attested: How many tool definitions does the model see at each Step, and how was that set chosen?
+    remediation:
+      scope: local
+      guidance: >-
+        Group Tools by Workflow phase and bind only the group for the current
+        phase; keep group definitions stable so each phase has a cacheable
+        prefix.
+    hooks: [model.before]
+    components: [orchestrator]
+    see_also: [EAS-07.04, EAS-08.04]
+    section: not-all-context-is-the-same
+
+  - id: EAS-08.09
+    title: Isolated agent traffic
+    level: L3
+    applies: Platforms where agent Tools call backends shared with human-facing products.
+    requirement: >-
+      Agent traffic to Tool backends MUST be isolated in its own capacity pool
+      or queue, rate-limited per tenant, and served from caches and snapshots
+      wherever possible. Every such cache key MUST include the tenant.
+    rationale: >-
+      An agent is a different kind of client from a person: dozens of calls
+      per Run, fan-out across hundreds of entities, retries, at any hour
+      across every tenant at once. Tenant-less cache keys are the most common
+      route by which one customer's data appears in another's results.
+    evidence:
+      static: >-
+        Tool backends route agent traffic to a dedicated pool, replica or
+        queue; per-tenant rate limits are configured; cache keys include the
+        tenant identifier.
+      runtime: Every `execute_tool` span carries `eas.tenant.id`; per-tenant rate-limit rejections are observable.
+      attested: If agent traffic spikes, which human-facing systems share capacity with it, and what protects them?
+    remediation:
+      scope: structural
+      guidance: >-
+        Put agent-facing reads behind a dedicated pool or read replica with
+        per-tenant rate limits, and serve high-volume reads from tenant-keyed
+        caches and snapshots.
+    components: [tool-gateway, scheduler]
+    see_also: [EAS-05.07, EAS-06.07]
+    section: every-tool-has-a-size-limit
+
+  - id: EAS-08.10
+    title: Context sufficiency measured
+    level: L3
+    applies: All Workflows with an EvalSuite.
+    requirement: >-
+      For each eval case, the EvalSuite MUST record which facts the correct
+      answer depends on, and evaluation MUST check whether those facts were
+      present in the context the agent actually received. "Answered without
+      the needed information" MUST be tracked as a distinct failure category,
+      separate from reasoning failures.
+    rationale: >-
+      If the needed facts were missing, the problem is upstream of the model
+      and no prompt engineering will fix it; a significant share of apparent
+      model error is really context error.
+    evidence:
+      declared: "`evaluation.suite` is set, and the dataset schema includes required facts per case."
+      static: >-
+        Eval cases annotate required facts; the evaluator inspects the
+        assembled context recorded for each case and reports a
+        missing-context failure category.
+      attested: What share of eval failures last release were missing-context failures, and how was that measured?
+    remediation:
+      scope: local
+      guidance: >-
+        Annotate required facts on existing eval cases and add a deterministic
+        check against the recorded context for each case.
+    components: [eval-platform]
+    see_also: [EAS-10.04]
+    section: was-the-context-enough

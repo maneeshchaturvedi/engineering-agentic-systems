@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Untrusted Content Is Data, Never Instructions"
+redirect_from: /07-untrusted-content-is-data.html
 order: 7
 ---
 

@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Context Is a Budget"
+redirect_from: /08-context-is-a-budget.html
 order: 8
 ---
 

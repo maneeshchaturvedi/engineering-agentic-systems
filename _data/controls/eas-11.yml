@@ -1,0 +1,236 @@
+domain: EAS-11
+order: 11
+slug: baseline
+title: Baseline Measurement
+essay: 11-measure-against-the-right-baseline
+summary: >-
+  The cost of a Workflow is measured per successful outcome, including every
+  cost it actually incurs, as incremental lift where possible, and judged
+  against the cheapest credible alternative rather than the most flattering
+  one.
+
+controls:
+  - id: EAS-11.01
+    title: Written success definition per Workflow
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Each Workflow MUST have a written definition of a successful outcome in
+      business terms, specific enough that a Run (or the OutcomeEvents joined
+      to it) can be classified as successful or not without judgement.
+    rationale: >-
+      A run that costs ten cents and is wrong is not cheaper than one that
+      costs thirty and is right; the meaningful denominator is successful
+      outcomes, which requires saying what success is.
+    evidence:
+      declared: >-
+        `workflows[].success_definition` is set. Not satisfied by: a
+        definition in activity terms ("Run completed", "response sent"), or
+        one that cannot be evaluated from recorded data.
+      attested: Which recorded fields or OutcomeEvents determine whether a Run of this Workflow succeeded?
+    remediation:
+      scope: local
+      guidance: >-
+        Write the definition with the business owner (for example "ticket
+        resolved without escalation and not reopened within 14 days") and
+        name the data that evaluates it.
+    components: [outcome-store]
+    see_also: [EAS-11.03]
+    section: cost-per-call-is-the-wrong-unit
+
+  - id: EAS-11.02
+    title: Complete cost attribution per Run
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Cost MUST be attributed to each Run across all components: model tokens
+      for every model used, tool and infrastructure costs (queries, search,
+      state and trace storage), human time spent reviewing, approving and
+      correcting the Run's work, and the cost of failed Runs and of work
+      retried or redone by hand. Each Run MUST record its identifier, tenant,
+      the entities it acted on, Workflow and version, and its cost components.
+    rationale: >-
+      Token cost is the most visible and often not the largest; human review
+      time is frequently the biggest cost and the one nobody counts, so an
+      agent cheap in tokens can cost more than the process it replaced.
+    evidence:
+      static: >-
+        A per-Run cost record (in the outcome store or warehouse) keyed by
+        Run identifier with separate components for model, tool/infrastructure
+        and human time; approval and review tooling that records reviewer time
+        against the Run. Not satisfied by: token cost alone; human review
+        time estimated only in aggregate.
+      runtime: >-
+        Every model span carries `gen_ai.request.model`,
+        `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` and
+        `eas.cost.usd`; every `eas.run` span carries `eas.run.id`,
+        `eas.tenant.id`, `eas.workflow.id` and `eas.workflow.version`.
+      attested: Produce the cost breakdown for a sample of Runs, including human review time and Runs that failed.
+    remediation:
+      scope: structural
+      guidance: >-
+        Emit model cost per call, attribute metered tool and storage costs and
+        reviewer time to `eas.run.id`, and record entity identifiers at
+        `run.end` so outcomes can later be joined.
+    hooks: [model.after, run.end]
+    components: [telemetry-pipeline, outcome-store, approval-service]
+    see_also: [EAS-05.04, EAS-12.03]
+    section: cost-per-call-is-the-wrong-unit
+
+  - id: EAS-11.03
+    title: Cost per successful outcome reported
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      For each Workflow and version, the number of Runs, their total cost,
+      the number of successful outcomes and the cost per successful outcome
+      MUST be reported, with uncertainty attached. Optimisation decisions
+      (such as a model change) MUST be evaluated on cost per successful
+      outcome, not on token cost alone.
+    rationale: >-
+      Cost per successful outcome connects engineering to business value, and
+      shows why a model that costs half as much but succeeds less often can
+      raise the real cost even as the token bill falls.
+    evidence:
+      static: A report or dashboard definition computing cost per successful outcome by Workflow and version from the per-Run cost and outcome data.
+      attested: Produce the current cost per successful outcome for each production Workflow and version, with its confidence interval.
+    remediation:
+      scope: local
+      guidance: >-
+        Join the per-Run cost record with the success definition and publish
+        a table by Workflow and version.
+    components: [outcome-store, telemetry-pipeline]
+    see_also: [EAS-11.01, EAS-11.02, EAS-12.03]
+    section: cost-per-call-is-the-wrong-unit
+
+  - id: EAS-11.04
+    title: Declared cheapest credible baseline
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Each Workflow MUST declare the baseline it is measured against: the
+      cheapest credible alternative a sensible team would actually use if the
+      agent did not exist (a rule, template, classifier or existing workflow).
+      Value claims MUST be stated relative to that baseline. A comparison
+      against the most expensive alternative (typically full human effort)
+      MUST NOT be used as the primary justification unless that alternative
+      is the one that would realistically be used.
+    rationale: >-
+      Comparing an agent to the salary of a person who would never have done
+      the work flatters it; against the realistic alternative the question
+      becomes sharp, and many agentic designs turn out to be beaten by simpler
+      ones.
+    evidence:
+      declared: >-
+        `workflows[].baseline` names the alternative process and its measured
+        or estimated cost and success rate.
+      attested: >-
+        What would this team use if the agent did not exist, and how does the
+        agent's cost per successful outcome compare with it? Produce the
+        comparison.
+    remediation:
+      scope: local
+      guidance: >-
+        Identify the simplest process that would be used instead, measure or
+        estimate its cost and success rate, and report the agent against it.
+    components: [outcome-store]
+    see_also: [EAS-01.02, EAS-01.05]
+    section: choosing-the-baseline
+
+  - id: EAS-11.05
+    title: Late outcome attribution
+    level: L3
+    applies: Workflows whose success is determined by OutcomeEvents that arrive after the Run ends.
+    requirement: >-
+      OutcomeEvents MUST be captured from the systems where they happen,
+      keyed by the same entities the Run recorded, and joined to Runs by a
+      scheduled job within a declared attribution window. The job MUST
+      recompute recent windows as late events arrive, and figures for a
+      period MUST be marked provisional until its attribution window has
+      closed.
+    rationale: >-
+      Real outcomes often arrive weeks after the agent acted; this is a
+      familiar event-time join problem and must be handled as one rather than
+      by counting only what is known at Run end.
+    evidence:
+      static: >-
+        Event emission from source systems into the outcome store; a scheduled
+        join with a configured attribution window and a recompute horizon;
+        a provisional flag on reported figures. Not satisfied by: a one-off
+        join at Run end; reports that present open-window figures as final.
+      attested: What is the attribution window for each Workflow, and how are provisional figures marked in reports?
+    remediation:
+      scope: structural
+      guidance: >-
+        Emit OutcomeEvents keyed by entity from the systems of record, and run
+        an event-time join that recomputes open windows and labels them
+        provisional.
+    hooks: [run.end]
+    components: [outcome-store]
+    see_also: [EAS-10.10, EAS-11.02]
+    section: outcomes-that-arrive-late
+
+  - id: EAS-11.06
+    title: Incremental lift
+    level: L3
+    applies: Workflows whose value is claimed as outcomes produced (for example meetings booked, tickets resolved).
+    requirement: >-
+      Value claims MUST be based on incremental outcomes, estimated by a
+      holdout (a random share of eligible cases receiving the baseline
+      treatment), a staggered rollout across comparable groups, or alternating
+      treatment periods. Where none is possible, reported figures MUST be
+      explicitly labelled as correlational and value claimed conservatively.
+    rationale: >-
+      Crediting the agent with every outcome overstates its value, because
+      some would have happened anyway; lift is the difference between what
+      happened with the agent and what would have happened without it.
+    evidence:
+      static: Holdout assignment logic (random, recorded per case) or a documented staggered-rollout design.
+      attested: >-
+        Produce the most recent lift estimate with holdout size and the cost
+        per incremental outcome, or the report showing figures labelled as
+        correlational.
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce a small random holdout (for example 5–10%) that receives the
+        declared baseline, record assignment per case, and report lift and
+        cost per incremental outcome.
+    components: [outcome-store, release-control]
+    see_also: [EAS-11.04]
+    section: lift-not-totals
+
+  - id: EAS-11.07
+    title: Evaluated model routing
+    level: L2
+    applies: Workflows that route between models (cascades, fallbacks to cheaper models).
+    requirement: >-
+      Before routing goes live, the EvalSuite MUST establish that the smaller
+      model's accepted answers are as good as the larger model's on the same
+      cases and that the check deciding escalation is reliable. After
+      launch, the escalation rate MUST be monitored, with an alert when it
+      drifts from the evaluated rate.
+    rationale: >-
+      A cascade can save most of the model bill, but only if the cheap model's
+      accepted answers are as good and the escalation check is reliable; a
+      rising escalation rate means inputs have shifted and the economics with
+      them.
+    evidence:
+      static: >-
+        Routing configuration under version control, an evaluation run that
+        compares the cascade with the large model alone, and an alert rule on
+        escalation rate. Not satisfied by: routing chosen on cost alone.
+      runtime: >-
+        The share of Runs with a ModelCall to the larger model
+        (`gen_ai.request.model`) is derivable per Workflow version and stays
+        within the alert threshold.
+      attested: Produce the evaluation that justified the routing configuration and the current escalation rate.
+    remediation:
+      scope: local
+      guidance: >-
+        Gate routing changes through the EvalSuite like any other Change and
+        add an escalation-rate alert to the Workflow's metrics.
+    hooks: [model.before]
+    components: [model-gateway, eval-platform]
+    see_also: [EAS-10.07, EAS-11.03]
+    section: where-the-savings-actually-come-from

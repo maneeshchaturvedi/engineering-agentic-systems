@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Bound Everything"
+redirect_from: /05-bound-everything.html
 order: 5
 ---
 

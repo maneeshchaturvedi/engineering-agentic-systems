@@ -1,0 +1,370 @@
+domain: EAS-06
+order: 6
+slug: identity
+title: Delegated Identity
+essay: 06-delegate-identity-narrow-scope
+summary: >-
+  An agent never acts as itself. Every Run acts on behalf of a Principal, with a
+  Credential that carries that Principal's identity and no more authority than
+  the task requires; delegation only narrows scope, identity never comes from
+  model output, and the systems that hold data enforce it.
+
+controls:
+  - id: EAS-06.01
+    title: No identity from model arguments
+    level: L1
+    applies: All Tools.
+    requirement: >-
+      Tools MUST NOT accept the tenant, user, principal or their permissions as
+      model-supplied arguments. Identity and tenancy MUST be taken from the
+      Run's authenticated Credential.
+    rationale: >-
+      If a Tool takes a `tenant_id` parameter, the model fills it in, which
+      means a prompt injection can fill it in. The model may choose which of the
+      user's resources to look at; it must never choose whose resources are in
+      scope.
+    evidence:
+      static: >-
+        Inspect the input schema of every Tool exposed to the model, including
+        sub-agent and third-party Tools. Any parameter that designates the
+        tenant, user, customer, organisation or principal (for example
+        `tenant_id`, `user_id`, `org_id`, `customer_id`, `on_behalf_of`) is a
+        finding. Tool implementations obtain these values from the Run context
+        or Credential.
+    remediation:
+      scope: local
+      guidance: >-
+        Remove identity parameters from Tool schemas and read the tenant and
+        Principal from the Run context injected by the framework, not from the
+        ToolRequest.
+    hooks: [tool.before]
+    components: [tool-gateway]
+    see_also: [EAS-06.02, EAS-02.03]
+    section: the-model-never-chooses-who-it-is
+
+  - id: EAS-06.02
+    title: Ownership verification on model-supplied identifiers
+    level: L1
+    applies: Tools that accept a resource identifier (order, account, document, ticket) from the model.
+    requirement: >-
+      Before reading or acting on a resource named by a model-supplied
+      identifier, the Tool MUST verify that the resource belongs to the Run's
+      tenant and is accessible to its Principal, and MUST return a not-found or
+      denied result otherwise.
+    rationale: >-
+      A customer who asks about "order 48213" can read any order by typing its
+      number unless the lookup checks that the order belongs to the
+      authenticated customer. Identity comes from authentication, never from
+      text.
+    evidence:
+      static: >-
+        For each Tool taking a resource identifier, the lookup is constrained by
+        the tenant and Principal from the Run's Credential (or performed by a
+        data store enforcing the delegated identity). Tests exist that call the
+        Tool with an identifier belonging to another tenant or Principal and
+        assert a denied or not-found result.
+      attested: What happens when a user of this Workflow supplies the identifier of a record belonging to another customer?
+    remediation:
+      scope: local
+      guidance: >-
+        Resolve every model-supplied identifier through a query scoped by the
+        Run's tenant and Principal, and add a cross-tenant test case for each
+        such Tool.
+    components: [tool-gateway]
+    see_also: [EAS-06.01, EAS-06.12]
+    section: the-model-never-chooses-who-it-is
+
+  - id: EAS-06.03
+    title: Per-Run delegated credential
+    level: L2
+    applies: All Workflows that access private or regulated data or perform effects.
+    requirement: >-
+      At the start of each Run the platform MUST mint a Credential whose
+      subject is the Principal, which records the agent as actor, carries only
+      the scopes the Workflow requires, and has a short expiry (for example by
+      token exchange from the Principal's authenticated session). Tools MUST
+      present this Credential to the systems they reach. Tools MUST NOT use a
+      broad service credential shared across Principals.
+    rationale: >-
+      An agent running on the service's own broad credentials is a confused
+      deputy: any tool call, whether correct, mistaken or induced by injection,
+      can reach data its user could not, turning every other mistake into a
+      breach.
+    evidence:
+      declared: >-
+        `principal.type` and `principal.scopes` set for the Workflow; every
+        `tools[].required_scopes` is a subset of `principal.scopes`.
+      static: >-
+        A `run.start` hook or identity broker mints the Credential (token
+        exchange or equivalent) with subject, actor, scopes and expiry; Tool
+        clients authenticate with the Run's Credential. Tools that read a
+        database password, API key or service token from shared configuration
+        to access Principal data are findings.
+      runtime: >-
+        Every `eas.run` span carries `eas.principal.type` and a non-empty
+        `eas.actor_chain`.
+      attested: When a Tool in this Workflow reads a customer's data, whose identity does the target system see?
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce an identity broker that exchanges the user's session for a
+        narrowed, short-lived, actor-bearing token per Run, and migrate Tool
+        clients from shared service credentials to that token.
+    hooks: [run.start]
+    components: [identity-broker]
+    see_also: [EAS-06.04, EAS-04.02]
+    section: the-agent-acts-on-behalf-of-someone
+
+  - id: EAS-06.04
+    title: Delegation only narrows scope; actor chain recorded
+    level: L2
+    applies: Workflows that delegate to sub-agents or handoff targets.
+    requirement: >-
+      When control passes to a sub-agent, its Credential MUST be derived from
+      the parent's (for example by a further token exchange) with scopes that
+      are a subset of the parent's, limited to what the sub-agent's task
+      requires, and the actor chain MUST be extended to record the sub-agent.
+      Delegation MUST NOT widen scope.
+    rationale: >-
+      Recording each actor preserves accountability through every hop, and
+      allowing each hop only to narrow makes delegation a way of reducing
+      authority rather than accumulating it.
+    evidence:
+      static: >-
+        A blocking `delegate` hook computes the child Credential as an
+        intersection with the parent's scopes and appends to the actor chain;
+        sub-agents that inherit the parent's Credential unchanged, or receive
+        one minted independently with broader scopes, are findings.
+      runtime: >-
+        On spans of a sub-agent, `eas.actor_chain` equals the parent's chain
+        plus exactly one additional actor.
+    remediation:
+      scope: local
+      guidance: >-
+        In the delegation path, exchange the parent's token for one restricted
+        to the sub-agent's declared Tools' scopes and record the sub-agent as
+        an additional actor.
+    hooks: [delegate]
+    components: [identity-broker, orchestrator]
+    see_also: [EAS-06.03, EAS-06.10]
+    section: the-agent-acts-on-behalf-of-someone
+
+  - id: EAS-06.05
+    title: Named service principals for non-human-triggered Runs
+    level: L2
+    applies: Workflows triggered by schedules or events rather than a user.
+    requirement: >-
+      Runs with no human Principal MUST act as a named service principal
+      specific to the Workflow, with an explicit, reviewed set of grants. Such
+      Runs MUST NOT act with the platform's general credentials.
+    rationale: >-
+      "The system" should never mean "the platform with all its permissions";
+      when someone asks why a Workflow could read some data, the answer should
+      be in a reviewed policy, not the history of a shared credential.
+    evidence:
+      declared: "`principal.type: service` with `principal.scopes` listing the Workflow's grants."
+      static: >-
+        The service principal is defined per Workflow in reviewed
+        configuration (identity or IAM policy in version control); it is not
+        shared with other Workflows or services.
+      attested: Where is this Workflow's service principal defined, who reviewed its grants, and is it used by anything else?
+    remediation:
+      scope: local
+      guidance: Create a dedicated service principal per scheduled or event-driven Workflow with only its declared scopes, and define its grants in version-controlled policy.
+    hooks: [run.start]
+    components: [identity-broker, scheduler]
+    section: the-agent-acts-on-behalf-of-someone
+
+  - id: EAS-06.06
+    title: No long-lived static secrets in agent runtime
+    level: L2
+    applies: All agent runtimes.
+    requirement: >-
+      The agent runtime MUST obtain its own identity from the platform
+      (workload identity) rather than from long-lived static keys in code,
+      images, environment configuration or files.
+    rationale: >-
+      Workload identity leaves no long-lived secret to leak.
+    evidence:
+      static: >-
+        No cloud access keys, database passwords or long-lived API tokens in
+        the repository, container images, deployment manifests or environment
+        files for the runtime; cloud SDKs resolve credentials from the
+        platform's workload identity.
+      attested: How does the runtime authenticate to the cloud provider and to data stores, and which secrets, if any, are static?
+    remediation:
+      scope: local
+      guidance: Bind the runtime's service account to a cloud role via workload identity and remove static keys from configuration.
+    components: [identity-broker, executor]
+    see_also: [EAS-06.11]
+    section: narrowing-at-the-infrastructure-layer
+
+  - id: EAS-06.07
+    title: Tenant-scoped shared stores
+    level: L2
+    applies: Multi-tenant Workflows.
+    requirement: >-
+      Every cache MUST include the tenant, and where relevant the user, in its
+      key. Search indexes, vector stores and memory stores MUST separate
+      tenants, and SHOULD do so physically (an index or namespace per tenant)
+      rather than by a query-time metadata filter. Prompt-cache reuse MUST NOT
+      allow one tenant's data to be served in another tenant's Run.
+    rationale: >-
+      Shared caches, indexes, memory and prompt caches with separation enforced
+      by a query-time filter leak one customer's data into another's results
+      when a filter is forgotten or a key omits the tenant.
+    evidence:
+      static: >-
+        Inspect key construction for every cache used by Tools or the
+        orchestrator; any key lacking the tenant is a finding. Inspect index and
+        namespace selection in retrieval and memory code; shared indexes relying
+        on a metadata filter are recorded and, at L3, are findings (see
+        EAS-06.12).
+      attested: Which stores hold tenant data across Runs, and how is each partitioned by tenant?
+    remediation:
+      scope: local
+      guidance: >-
+        Add the tenant from the Run context to every cache key centrally; move
+        vector and memory data to per-tenant namespaces selected from the Run's
+        Credential.
+    hooks: [memory.write]
+    components: [context-service, memory-store]
+    see_also: [EAS-06.12, EAS-12.07]
+    section: enforcement-belongs-in-the-data-layer
+
+  - id: EAS-06.08
+    title: Explicit partial visibility
+    level: L2
+    applies: Tools whose results are filtered by the Principal's permissions.
+    requirement: >-
+      When permissions exclude results, the Tool MUST say so in its output (for
+      example, "results limited to records you have access to; some records
+      were excluded") so the model can qualify its answer.
+    rationale: >-
+      The model usually does not know it is seeing a subset and answers as if
+      its view were complete. Silent subsets are a correctness problem
+      disguised as a security feature.
+    evidence:
+      static: >-
+        Permission-filtered Tools detect that filtering removed results (from
+        the data store's response or a count comparison) and include an
+        explicit marker in their output schema.
+    remediation:
+      scope: local
+      guidance: Add a `partial_due_to_permissions` field or equivalent to filtered Tools' output and a sentence in the result text.
+    hooks: [tool.after]
+    components: [tool-gateway]
+    see_also: [EAS-08.01]
+    section: seeing-too-little
+
+  - id: EAS-06.09
+    title: Fail closed on permission-system failure
+    level: L2
+    applies: All Workflows reading customer data.
+    requirement: >-
+      If a permission cannot be confirmed because the permission system is
+      unavailable or errors, reads of customer data MUST be denied. A cache of
+      permission decisions MAY be used; its TTL MUST be an explicit number,
+      documented and agreed with the security owner.
+    rationale: >-
+      Failing closed costs availability, and it is the right trade. A cache
+      softens the cost but opens a window in which a revoked permission is
+      honoured, so the window must be a deliberate number, not an accident of
+      configuration.
+    evidence:
+      static: >-
+        Error and timeout paths in permission checks return deny; permission
+        cache TTL is set explicitly in configuration; a test simulates the
+        permission service being unavailable and asserts denial.
+      attested: What is the permission-cache TTL, where is it documented, and who in security agreed it?
+    remediation:
+      scope: local
+      guidance: Treat exceptions in permission checks as deny, set the cache TTL explicitly, and record the agreed value next to the configuration.
+    hooks: [tool.before]
+    components: [policy-engine, identity-broker]
+    section: failing-closed-and-what-it-costs
+
+  - id: EAS-06.10
+    title: Audit at tool-call grain
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Every Tool invocation MUST be recorded with the Run, the full actor
+      chain, the Tool, the permissions used, the resources touched and the
+      PolicyDecision, such that all access on behalf of a given tenant or
+      Principal over a period can be retrieved by query.
+    rationale: >-
+      When a customer's security team asks for everything the AI accessed on
+      their behalf last quarter, the answer should be a query.
+    evidence:
+      static: The tool interception point writes an audit record per invocation containing all six elements to a queryable store with retention matching the audit obligation.
+      runtime: >-
+        Every `execute_tool` span carries `eas.run.id`, `eas.actor_chain`,
+        `eas.tenant.id` and `gen_ai.tool.name`, and is preceded by an
+        `eas.policy` span for the same ToolRequest.
+      attested: Produce the record of every resource this Workflow accessed on behalf of one named tenant during the last month.
+    remediation:
+      scope: local
+      guidance: Emit a structured audit record from the `tool.after` hook using the Run's Credential for actor chain and scopes and the Tool's result for resource identifiers.
+    hooks: [tool.before, tool.after]
+    components: [tool-gateway, telemetry-pipeline]
+    see_also: [EAS-04.05, EAS-12.06]
+    section: audit-at-the-same-grain
+
+  - id: EAS-06.11
+    title: Per-Run narrowed cloud credentials
+    level: L3
+    applies: Workflows whose Tools access cloud resources directly.
+    requirement: >-
+      Each Run MUST receive short-lived cloud credentials narrowed for that Run
+      (for example a role assumption with a session policy that can only reduce
+      the role's permissions), tagged with at least the tenant and Run
+      identifier, so that the cloud provider itself limits the Run to its
+      tenant's resources.
+    rationale: >-
+      A Run acting for tenant A then holds credentials that, at the provider's
+      own enforcement layer, can only reach tenant A's resources; a compromised
+      Run is bounded by something the agent cannot negotiate with.
+    evidence:
+      static: Run start obtains session credentials with a session policy restricting resources to the tenant and session tags for tenant and Run; resource policies use the tags.
+      attested: If a Run for tenant A requested an object belonging to tenant B, which layer would deny it?
+    remediation:
+      scope: structural
+      guidance: Have the identity broker assume a per-Workflow role per Run with a tenant-scoped session policy and tenant and Run tags; key resource policies on those tags.
+    hooks: [run.start]
+    components: [identity-broker]
+    see_also: [EAS-06.06, EAS-04.06]
+    section: narrowing-at-the-infrastructure-layer
+
+  - id: EAS-06.12
+    title: Data-layer enforcement
+    level: L3
+    applies: Workflows with `data_access` of `private` or `regulated`.
+    requirement: >-
+      Data stores reached by Tools MUST enforce the Principal's permissions
+      themselves, using the Run's delegated identity — through row- and
+      column-level security, or physically per-tenant indexes and namespaces —
+      so that a Tool that omits a filter still receives only permitted data.
+      Where a service connects on users' behalf by impersonation, the
+      identities it may assume MUST be narrowly defined, reviewed and audited.
+    rationale: >-
+      Application-level filters depend on every Tool, written by every team,
+      applying them correctly every time. Enforcement in the data layer turns an
+      application bug into a denied query and an alert instead of a breach.
+    evidence:
+      declared: "`policies[]` entries for data visibility with `enforced_at` including `data_layer`."
+      static: >-
+        Row- or column-level policies in the data store keyed on the session
+        identity; per-tenant indexes for search and vector stores; impersonation
+        configuration listing permitted identities, under review.
+      runtime: Denied out-of-scope reads appear as `eas.policy` spans with `eas.policy.point = data_layer`.
+      attested: Who may the impersonating service act as, who reviews that list, and where are its impersonations logged?
+    remediation:
+      scope: structural
+      guidance: >-
+        Start with application-level filtering plus physical tenant separation,
+        then move enforcement into the data layer for agent workloads first,
+        propagating the delegated identity to the store.
+    components: [data-governance, identity-broker]
+    see_also: [EAS-04.06, EAS-06.07]
+    section: enforcement-belongs-in-the-data-layer

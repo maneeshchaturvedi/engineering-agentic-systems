@@ -1,0 +1,382 @@
+domain: EAS-10
+order: 10
+slug: evidence-gated-change
+title: Evidence-Gated Change
+essay: 10-evidence-gated-change
+summary: >-
+  Every Change that can alter an agent's behaviour passes through a gate, and
+  the gate is evidence: an EvalSuite designed well enough to detect the
+  regressions that matter, followed by shadow and canary exposure, with a kill
+  switch behind all of them.
+
+controls:
+  - id: EAS-10.01
+    title: All behaviour-altering changes versioned
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Change that can alter agent behaviour (prompt, model, tool
+      description, retrieval configuration, Workflow code, policy, EvalSuite
+      dataset) MUST be made through version control and MUST produce a new
+      Workflow version. Behaviour MUST NOT be alterable through edits in a
+      vendor console or runtime configuration store that bypass version
+      control. Every Run MUST record the Workflow version it executed.
+    rationale: >-
+      Prompt edits, model swaps, reworded tool descriptions and tuned
+      retrieval settings can alter behaviour as much as a code change, yet
+      they are often made in a configuration file or vendor console, checked
+      on a few examples, and shipped without any gate.
+    evidence:
+      declared: "`workflows[].version` is set and changes whenever any behaviour-altering artefact changes."
+      static: >-
+        Prompts, tool descriptions, model identifiers, retrieval parameters
+        and policies live in the repository (or in a registry that pins each
+        Workflow version to an immutable revision) and are loaded from there
+        at runtime. Not satisfied by: prompts fetched by name from a
+        prompt-management service or vendor console without a pinned
+        revision; a floating model alias (for example `latest`) whose target
+        can change without a Change; retrieval settings held only in a
+        mutable environment or admin UI.
+      runtime: >-
+        Every `eas.run` span carries `eas.workflow.id` and
+        `eas.workflow.version`, and every observed `eas.workflow.version`
+        resolves to a revision in version control.
+      attested: >-
+        Can anyone change a prompt, model, tool description or retrieval
+        setting in production without a commit? Produce the list of
+        behaviour-altering artefacts and where each is versioned.
+    remediation:
+      scope: local
+      guidance: >-
+        Move prompts, tool descriptions and retrieval configuration into the
+        repository, pin model snapshots explicitly, derive the Workflow version
+        from the commit, and remove write access to any console that can
+        change production behaviour.
+    components: [release-control]
+    see_also: [EAS-10.07, EAS-09.08]
+    section: the-gates
+
+  - id: EAS-10.02
+    title: Kill switch
+    level: L1
+    applies: All Workflows in production.
+    requirement: >-
+      It MUST be possible to disable a Workflow, a specific Workflow version,
+      or a specific tenant's use of a Workflow immediately, without a deploy.
+      The switch MUST be checked before a Run is admitted and SHOULD be
+      checked before each Step so that in-flight Runs stop at the next Step
+      boundary.
+    rationale: >-
+      Behind every other gate sits the ability to stop a Workflow instantly.
+      Most of the time it is never used; when it is needed, nothing else will
+      do.
+    evidence:
+      static: >-
+        A runtime flag or control-plane setting, keyed by Workflow, version
+        and tenant, read at Run admission (a `run.start` hook or scheduler
+        check). Not satisfied by: an environment variable or configuration
+        file that takes effect only on redeploy; a switch that covers the
+        whole Workflow but not individual versions or tenants.
+      runtime: >-
+        In a drill or real use, no new `eas.run` span with the disabled
+        `eas.workflow.id` / `eas.workflow.version` / `eas.tenant.id`
+        combination starts after the switch time.
+      attested: >-
+        Who can operate the kill switch, how long does it take to take effect,
+        and when was it last exercised? Produce the runbook and the record of
+        the most recent drill.
+    remediation:
+      scope: local
+      guidance: >-
+        Add a flag lookup keyed by Workflow, version and tenant to Run
+        admission and the Step loop; document the operating procedure and
+        drill it.
+    hooks: [run.start, model.before]
+    components: [release-control, scheduler, orchestrator]
+    see_also: [EAS-05.13, EAS-10.09]
+    section: the-gates
+
+  - id: EAS-10.03
+    title: Deliberate, versioned eval dataset
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Each Workflow MUST have an EvalSuite whose dataset is assembled
+      deliberately from: sampled production tasks with personal data removed;
+      every incident and escalation converted into a case; adversarial cases;
+      and synthetic cases for rare but important situations. The dataset MUST
+      be stratified by the dimensions that matter (for example customer
+      segment, task type, Workflow branch, difficulty) with results reported
+      per stratum, and MUST be versioned so that comparisons between versions
+      of the Workflow use the same dataset version.
+    rationale: >-
+      The evaluation must reflect the actual distribution of inputs rather
+      than what engineers imagine; past failures should become permanent
+      checks; and a regression on a rare stratum should show up as such
+      rather than disappearing into an average.
+    evidence:
+      declared: "`evaluation.suite` and `evaluation.dataset_version` are set for the Workflow."
+      static: >-
+        An eval dataset directory or registry entry with version history, case
+        metadata recording source (`production_sample`, `incident`,
+        `escalation`, `adversarial`, `synthetic`) and stratum, and a
+        documented sampling and redaction procedure. Not satisfied by: a
+        hand-written list of examples with no production sample; a dataset
+        edited in place without a version; incidents fixed without a
+        corresponding case.
+      attested: >-
+        How are production tasks sampled into the suite, and what is the
+        process that turns an incident or escalation into a case? Produce the
+        last three incident-derived cases and their dataset version.
+    remediation:
+      scope: local
+      guidance: >-
+        Start a versioned dataset from a redacted production sample, add one
+        case per historical incident and escalation, tag every case with
+        source and stratum, and make incident review produce a case as a
+        required output.
+    components: [eval-platform]
+    see_also: [EAS-07.08, EAS-12.11]
+    section: datasets-built-deliberately
+
+  - id: EAS-10.04
+    title: Outcome and trajectory evaluation
+    level: L2
+    applies: All Workflows at rung `fixed_workflow` and above.
+    requirement: >-
+      The EvalSuite MUST evaluate both outcomes (correctness, groundedness,
+      policy compliance, well-formedness) and trajectories (Tools chosen,
+      arguments passed, unnecessary calls, forbidden actions). It MUST report
+      at least: task success rate, tool-call precision, groundedness and
+      citation accuracy, policy violation rate, Steps and cost per task,
+      latency to first useful action, and unrecoverable failure rate.
+    rationale: >-
+      The final answer is not the only thing worth checking: an agent that
+      reaches the right answer with thirty tool calls where four would do has
+      regressed, because it costs more, takes longer and has more chances to
+      go wrong.
+    evidence:
+      declared: "`evaluation.gates[]` names metrics covering both outcome and trajectory."
+      static: >-
+        Evaluators in the suite that inspect recorded tool calls and Step
+        counts as well as final output. Not satisfied by: a suite that scores
+        only the final response.
+      attested: Produce the most recent evaluation report showing each listed metric for the current and previous Workflow version.
+    remediation:
+      scope: local
+      guidance: >-
+        Record the trajectory of each eval Run from its Trace, and add
+        evaluators for tool choice, argument correctness, call count and
+        forbidden actions alongside the outcome checks.
+    components: [eval-platform, telemetry-pipeline]
+    section: outcomes-and-trajectories
+
+  - id: EAS-10.05
+    title: Stated minimum detectable effect
+    level: L2
+    applies: All Workflows with an EvalSuite.
+    requirement: >-
+      Each EvalSuite MUST state its minimum detectable effect on each primary
+      metric, computed from its size, design (independent or paired), the
+      baseline rate, and stated false-alarm and power settings. Release
+      decisions MUST NOT claim the absence of a regression smaller than the
+      stated minimum detectable effect.
+    rationale: >-
+      Every suite has a smallest regression it can see; a fifty-case golden
+      set can detect a collapse but not a five-point drop. Knowing the figure
+      turns "did the evaluation pass?" into an honest statement of what the
+      gate can catch.
+    evidence:
+      declared: "`evaluation.mde` is set per primary metric."
+      static: >-
+        The calculation (or the script that produces it) is stored with the
+        suite, including significance level, power, baseline rate and
+        design. Not satisfied by: a suite size chosen without a calculation.
+      attested: What is the smallest drop in task success your release gate will reliably detect, and how was that figure derived?
+    remediation:
+      scope: local
+      guidance: >-
+        Compute the minimum detectable effect from the current suite size; if
+        it is larger than the regression you care about, enlarge the suite or
+        move to a paired design (EAS-10.08).
+    components: [eval-platform]
+    see_also: [EAS-10.08]
+    section: statistics-so-you-dont-chase-noise
+
+  - id: EAS-10.06
+    title: Calibrated judges
+    level: L2
+    applies: All EvalSuites that use a model as a judge.
+    requirement: >-
+      Criteria that code can check (schema conformance, cited source exists
+      and supports the claim, recipient on an allowed list, required
+      disclosure present) MUST be checked deterministically, not by a judge.
+      Each model judge MUST be calibrated against human labels per criterion
+      using a chance-corrected agreement statistic (for example Cohen's
+      kappa), with verdicts on criteria of low agreement not used for gating.
+      Known biases MUST be controlled: presentation order randomised in
+      pairwise comparison, and length and same-family preference measured.
+      A change to the judge model MUST trigger recalibration.
+    rationale: >-
+      A judge is a measuring instrument, not an oracle: it may agree with
+      humans on accuracy and disagree badly on tone, it favours first
+      positions, longer answers and its own model family, and a new judge is
+      a new instrument.
+    evidence:
+      static: >-
+        Stored human-labelled calibration set, per-criterion agreement results
+        tied to the judge model and prompt version, order randomisation in
+        pairwise judge code, and deterministic evaluators for checkable
+        criteria. Not satisfied by: a single overall agreement figure; a
+        judge used for schema or citation existence checks.
+      attested: >-
+        For each judged criterion, what is the current agreement with human
+        labels, and when was the judge last recalibrated? Produce the
+        calibration report.
+    remediation:
+      scope: local
+      guidance: >-
+        Replace judge checks for anything code can verify; label a sample per
+        criterion, compute kappa, and pin the judge model so that changing it
+        is a Change that requires recalibration.
+    components: [eval-platform]
+    see_also: [EAS-04.03]
+    section: judges-calibrated
+
+  - id: EAS-10.07
+    title: CI evaluation gate
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Every Change to a prompt, model, tool description or Workflow MUST run
+      the EvalSuite in continuous integration. A statistically significant
+      regression beyond a set threshold on a primary metric MUST block the
+      Change. A regression on a secondary metric MUST require a written
+      justification and a named person's sign-off. Suites SHOULD be tiered:
+      a smoke suite on every Change, the full suite before merge to the main
+      branch and before release, and an extended multi-sample suite on a
+      schedule.
+    rationale: >-
+      Inspecting a handful of examples catches catastrophes and almost
+      nothing else; a change that makes the agent slightly worse on a tenth of
+      cases is invisible in a dozen hand-checked outputs and very visible in
+      production a week later.
+    evidence:
+      declared: "`evaluation.gates[]` lists primary and secondary metrics with thresholds."
+      static: >-
+        A CI workflow (for example under `.github/workflows/`) triggered by
+        changes to prompts, model configuration, tool definitions and
+        Workflow code that runs the suite and fails the build on a primary
+        regression; a required status check on the main branch; a recorded
+        sign-off mechanism for secondary regressions. Not satisfied by: an
+        eval job that reports but cannot fail; path filters that exclude
+        prompt or configuration files; a gate that compares against a
+        threshold without a significance test.
+      attested: Produce the most recent blocked Change and the most recent secondary-metric sign-off, with the named approver.
+    remediation:
+      scope: local
+      guidance: >-
+        Add a CI job that runs the smoke suite on every relevant path, the
+        full suite on merge, and fails on a significant primary regression;
+        make it a required check.
+    components: [eval-platform, release-control]
+    see_also: [EAS-10.01, EAS-10.05]
+    section: the-gates
+
+  - id: EAS-10.08
+    title: Paired comparison designs
+    level: L3
+    applies: Workflows at risk tier `T3` or where the suite's minimum detectable effect is larger than the regression of concern.
+    requirement: >-
+      Comparisons between Workflow versions MUST run both versions on the
+      same cases and compare them case by case, using a paired test (McNemar's
+      test for pass/fail outcomes). For tasks with high run-to-run variance,
+      each case MUST be sampled several times per version.
+    rationale: >-
+      Pairing removes the variation that comes from cases differing from one
+      another and detects the same difference with considerably fewer cases;
+      repeated sampling further reduces noise on variable tasks.
+    evidence:
+      static: >-
+        Evaluation code that executes baseline and candidate on an identical
+        case set and dataset version, applies a paired test, and supports a
+        samples-per-case setting. Not satisfied by: comparing a candidate's
+        score against a historical baseline score from an earlier run.
+      attested: Produce the paired comparison output for the last release, including the test used and samples per case.
+    remediation:
+      scope: local
+      guidance: >-
+        Re-run the current production version alongside every candidate on
+        the same dataset version and replace unpaired threshold checks with
+        McNemar's test.
+    components: [eval-platform]
+    see_also: [EAS-10.05]
+    section: statistics-so-you-dont-chase-noise
+
+  - id: EAS-10.09
+    title: Shadow and canary with automatic rollback
+    level: L3
+    applies: All Workflows at risk tier `T3`.
+    requirement: >-
+      Before full release, a new Workflow version MUST run in shadow on real
+      traffic with side effects disabled, with its Decisions compared with
+      the current version's and divergence reviewed. It MUST then receive a
+      small share of real traffic as a canary, with errors, policy
+      rejections, escalation rate and cost per Run monitored against
+      thresholds, and an automatic rollback when any threshold is breached.
+    rationale: >-
+      Offline suites cannot capture everything real traffic does; shadow
+      exposes divergence without consequence, and a canary limits the blast
+      radius of what remains while a rollback acts faster than a person.
+    evidence:
+      static: >-
+        Shadow mode in which the executor is disabled or replaced (no
+        ActionIntent is executed); traffic-splitting configuration by
+        Workflow version; rollback automation wired to canary alert rules.
+        Not satisfied by: a canary watched manually with no automated
+        rollback; shadow runs that can execute effects.
+      runtime: >-
+        Metrics by `eas.workflow.version` (`eas.run.status`, `eas.policy.decision = deny`,
+        `escalate` decisions, `eas.cost.usd`) are available for the canary
+        version; no `eas.execute` span exists for a Run executing in shadow.
+      attested: Produce the shadow divergence review and canary record for the last release, and the most recent automatic rollback.
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce version-aware traffic routing in release control, a shadow
+        mode that disables the executor, and alert-driven rollback to the
+        previous pinned version.
+    components: [release-control, executor, telemetry-pipeline]
+    see_also: [EAS-03.10, EAS-10.02, EAS-12.03, EAS-12.04]
+    section: the-gates
+
+  - id: EAS-10.10
+    title: Proxy validity checks
+    level: L3
+    applies: All Workflows whose release gates rely on offline proxies.
+    requirement: >-
+      The offline metrics used as release gates MUST be validated
+      periodically against online business outcomes, by checking whether
+      versions that score better on the proxies also produce better
+      OutcomeEvents. A proxy that stops predicting the outcome MUST be
+      removed from gating and the EvalSuite revised.
+    rationale: >-
+      An evaluation suite measures proxies; its value rests on the assumption
+      that better proxy scores mean better outcomes, and that assumption
+      breaks when the product, user behaviour or optimisation pressure
+      changes.
+    evidence:
+      attested: >-
+        When were offline scores last compared with online outcomes per
+        Workflow version, and with what result? Produce the analysis and any
+        resulting suite revision.
+      static: A scheduled job or analysis joining evaluation results by Workflow version to outcome metrics from the outcome store.
+    remediation:
+      scope: structural
+      guidance: >-
+        Join per-version evaluation scores with per-version outcome rates
+        (EAS-11.05) on a fixed schedule and record the correlation; retire
+        proxies that stop tracking.
+    components: [eval-platform, outcome-store]
+    see_also: [EAS-11.03, EAS-11.05]
+    section: offline-evidence-must-predict-online-outcomes

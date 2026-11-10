@@ -1,0 +1,8 @@
+---
+layout: default
+body_class: doc
+---
+<p class="kicker">{{ page.section }}{% if page.status %} · {{ page.status }}{% endif %}{% if page.verified_version %} · verified against {{ page.framework }} {{ page.verified_version }} on {{ page.verified_on }}{% endif %}</p>
+<article>
+  {{ content }}
+</article>

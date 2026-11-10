@@ -1,0 +1,49 @@
+---
+layout: default
+body_class: doc
+---
+{% assign d = site.data.controls[page.domain] %}
+<p class="kicker">Specification · Controls · {{ d.domain }}</p>
+<article>
+  <h1>{{ d.domain }} {{ d.title }}</h1>
+  <p class="lede">{{ d.summary }}</p>
+  <p class="meta">Rationale: <a href="{{ '/essays/' | append: d.essay | append: '.html' | relative_url }}">Principle {{ d.order }} essay</a> ·
+    {{ d.controls.size }} controls ·
+    L1 {{ d.controls | where: "level", "L1" | size }} ·
+    L2 {{ d.controls | where: "level", "L2" | size }} ·
+    L3 {{ d.controls | where: "level", "L3" | size }}</p>
+
+  <table class="index">
+    <thead><tr><th>ID</th><th>Control</th><th>Level</th><th>Fix</th></tr></thead>
+    <tbody>
+    {% for c in d.controls %}
+      <tr><td><a href="#{{ c.id | downcase | replace: '.', '-' }}">{{ c.id }}</a></td><td>{{ c.title }}</td><td><span class="lvl {{ c.level | downcase }}">{{ c.level }}</span></td><td>{{ c.remediation.scope }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {{ content }}
+
+  {% for c in d.controls %}
+  <section class="control" id="{{ c.id | downcase | replace: '.', '-' }}">
+    <h2><span class="cid">{{ c.id }}</span> {{ c.title }} <span class="lvl {{ c.level | downcase }}">{{ c.level }}</span></h2>
+    <p class="applies"><strong>Applies to:</strong> {{ c.applies | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
+    <div class="requirement">{{ c.requirement | markdownify }}</div>
+    <p class="rationale"><strong>Why:</strong> {{ c.rationale | markdownify | remove: '<p>' | remove: '</p>' | strip }}
+      <a href="{{ '/essays/' | append: d.essay | append: '.html' | relative_url }}#{{ c.section }}">Essay&nbsp;→</a></p>
+    <dl class="evidence">
+      {% for kind in site.data.evidence_kinds %}{% assign ev = c.evidence[kind.key] %}{% if ev %}
+      <dt>{{ kind.label }}</dt><dd>{{ ev | markdownify | remove: '<p>' | remove: '</p>' | strip }}</dd>
+      {% endif %}{% endfor %}
+    </dl>
+    <p class="remediation"><strong>Remediation <span class="scope">{{ c.remediation.scope }}</span>:</strong> {{ c.remediation.guidance | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
+    {% if c.hooks or c.components or c.see_also %}
+    <p class="refs">
+      {% if c.hooks %}Hooks: {% for h in c.hooks %}<a href="{{ '/spec/hooks.html' | relative_url }}"><code>{{ h }}</code></a>{% unless forloop.last %}, {% endunless %}{% endfor %}{% endif %}
+      {% if c.components %}{% if c.hooks %} · {% endif %}Components: {% for comp in c.components %}<a href="{{ '/blueprint/' | relative_url }}#{{ comp }}">{{ comp }}</a>{% unless forloop.last %}, {% endunless %}{% endfor %}{% endif %}
+      {% if c.see_also %}{% if c.hooks or c.components %} · {% endif %}See also: {% for ref in c.see_also %}{% assign rkey = ref | slice: 0, 6 | downcase %}<a href="{{ site.data.controls[rkey].slug | append: '.html' }}#{{ ref | downcase | replace: '.', '-' }}">{{ ref }}</a>{% unless forloop.last %}, {% endunless %}{% endfor %}{% endif %}
+    </p>
+    {% endif %}
+  </section>
+  {% endfor %}
+</article>

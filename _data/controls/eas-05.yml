@@ -1,0 +1,341 @@
+domain: EAS-05
+order: 5
+slug: bounds
+title: Bounds
+essay: 05-bound-everything
+summary: >-
+  Every dimension along which an agent can consume resources has an explicit
+  limit, enforced by deterministic code outside the model, so that the worst
+  case of any Run can be stated in advance.
+
+controls:
+  - id: EAS-05.01
+    title: Step limit
+    level: L1
+    applies: All Workflows at rung `agent` or `multi_agent`.
+    requirement: >-
+      Every Run MUST have a maximum number of Steps, enforced by the
+      orchestration layer. Reaching the limit MUST end the Run with a distinct
+      terminal status (`budget_exhausted`), not an error that triggers a retry.
+    rationale: >-
+      A confused model can loop indefinitely. At production volume a loop is a
+      statistical certainty, and the only reliable defence is a hard cap the
+      model cannot negotiate with.
+    evidence:
+      declared: "`budgets.steps` is set for the Workflow in the manifest."
+      static: >-
+        The framework's step or recursion limit is set explicitly to a finite
+        value, in code or configuration that the model cannot influence. A
+        framework default counts only if the profile confirms it is finite.
+      runtime: >-
+        Every Run span carries `eas.budget.steps.limit`; no Run's step count
+        exceeds it; Runs that hit it end with status `budget_exhausted`.
+    remediation:
+      scope: local
+      guidance: >-
+        Set the framework's step or recursion limit from the Workflow's
+        declared budget, and map the limit-reached exception to a terminal
+        status rather than a retryable error.
+    hooks: [model.before, run.end]
+    components: [orchestrator]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.02
+    title: Token limit
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Run MUST have a cap on total input plus output tokens, checked
+      before each ModelCall against the tokens already consumed.
+    rationale: >-
+      A Run with few Steps but very large context can cost as much as one with
+      many Steps; a step cap alone does not bound spend.
+    evidence:
+      declared: "`budgets.tokens` is set in the manifest."
+      static: >-
+        A check of accumulated usage against a limit runs before each model
+        call (a `model.before` hook or equivalent). Per-call `max_tokens` alone
+        does not satisfy this control; it bounds one call, not the Run.
+      runtime: "`eas.budget.tokens.used` never exceeds `eas.budget.tokens.limit` on any Run."
+    remediation:
+      scope: local
+      guidance: >-
+        Accumulate `gen_ai.usage.*` per Run in a `model.after` hook and refuse
+        further calls in `model.before` once the limit is reached.
+    hooks: [model.before, model.after]
+    components: [orchestrator, model-gateway]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.03
+    title: Wall-time limit and call timeouts
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Run MUST have a maximum elapsed active time, and every ModelCall and
+      tool invocation MUST have a timeout. Time spent durably waiting (see
+      EAS-09.02) does not count against the active-time limit.
+    rationale: >-
+      A stuck tool or a slow provider should release resources and report, not
+      hang.
+    evidence:
+      declared: "`budgets.wall_time_s` is set in the manifest."
+      static: >-
+        Explicit timeouts on model clients and on every tool's outbound I/O; a
+        Run-level deadline enforced by the orchestrator or runtime.
+      runtime: "No `execute_tool` or model span exceeds its configured timeout."
+    remediation:
+      scope: local
+      guidance: >-
+        Pass explicit timeouts to the model client and to HTTP or database
+        clients inside tools; wrap Run execution in a deadline.
+    hooks: [run.start, tool.before]
+    components: [orchestrator, tool-gateway, model-gateway]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.04
+    title: Cost limit
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Every Run MUST have a cap expressed in currency that combines token
+      consumption across models at their respective prices with metered tool
+      and infrastructure costs.
+    rationale: >-
+      The currency cap catches what the token cap misses, such as an
+      unexpected escalation to a more expensive model.
+    evidence:
+      declared: "`budgets.cost_usd` is set in the manifest."
+      static: A price table per model and a per-Run cost accumulator checked before each ModelCall.
+      runtime: "`eas.cost.usd` is recorded on every model span; Run totals never exceed the limit."
+    remediation:
+      scope: local
+      guidance: Extend the token accumulator with a per-model price table and enforce the currency cap in the same hook.
+    hooks: [model.before, model.after]
+    components: [model-gateway]
+    see_also: [EAS-05.02, EAS-11.02]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.05
+    title: Per-tool call limit
+    level: L1
+    applies: All Workflows that expose tools to the model.
+    requirement: >-
+      Every Run MUST cap the number of invocations of each Tool, enforced at
+      the tool interception point.
+    rationale: >-
+      A common failure is the model calling the same search or lookup
+      repeatedly with minor variations, hoping for a different result.
+    evidence:
+      declared: "`budgets.tool_calls` (default and per-tool overrides) in the manifest."
+      static: A per-tool counter checked in a `tool.before` hook or tool gateway.
+      runtime: No Run has more `execute_tool` spans for a Tool than its configured limit.
+    remediation:
+      scope: local
+      guidance: Add a per-Run, per-Tool counter to the tool interception point and deny with a structured error once exceeded.
+    hooks: [tool.before]
+    components: [tool-gateway]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.06
+    title: Tool output size limit
+    level: L1
+    applies: All Tools whose output is returned to the model.
+    requirement: >-
+      Every Tool MUST declare a maximum output size measured in tokens, and the
+      limit MUST be enforced before the output enters the model's context.
+      Truncation semantics are specified by EAS-08.01.
+    rationale: >-
+      An unbounded tool can flood the context window in one call, degrading
+      reasoning and multiplying the cost of every later Step.
+    evidence:
+      declared: "`tools[].output_limit_tokens` for every Tool in the manifest."
+      static: Output size enforcement in each tool or in a shared `tool.after` hook.
+      runtime: "`eas.tool.output_tokens` never exceeds the Tool's declared limit."
+    remediation:
+      scope: local
+      guidance: Enforce limits once in a shared `tool.after` hook rather than in every tool.
+    hooks: [tool.after]
+    components: [tool-gateway]
+    see_also: [EAS-08.01]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.07
+    title: Concurrency limits
+    level: L2
+    applies: Workflows that fan out (parallel tool calls, parallel sub-agents) or run multi-tenant.
+    requirement: >-
+      The number of parallel operations in flight MUST be capped per Run, per
+      tenant and per Workflow, so that fan-out cannot overwhelm the systems
+      behind the Tools.
+    rationale: >-
+      Agents are a different kind of client from people: one Run can fan out
+      across hundreds of entities, at any hour, across every tenant at once.
+    evidence:
+      declared: "`budgets.concurrency` in the manifest."
+      static: Semaphores or worker-pool limits around parallel tool and sub-agent execution; tenant-level limits in the scheduler.
+      runtime: Concurrent `execute_tool` spans per Run and per tenant never exceed configured limits.
+    remediation:
+      scope: local
+      guidance: Bound parallel execution with a semaphore sized from the manifest; add tenant-level limits at admission.
+    components: [scheduler, tool-gateway]
+    section: the-dimensions-that-need-limits
+
+  - id: EAS-05.08
+    title: Retry in exactly one layer
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      For each dependency (model provider, tool backend), retries MUST happen
+      in exactly one layer of the stack, using exponential backoff with jitter
+      and honouring any retry-after signal. All other layers MUST NOT retry
+      that dependency.
+    rationale: >-
+      If each of three layers retries three times, one logical call becomes
+      twenty-seven attempts, arriving exactly when the provider is overloaded.
+    evidence:
+      static: >-
+        Inventory every retry mechanism on the path to each dependency: model
+        SDK client defaults, framework step retry, tool wrappers (for example
+        decorator-based retry libraries), workflow-engine retry policies. More
+        than one active layer for the same dependency is a finding. SDK client
+        defaults count as an active layer unless explicitly disabled.
+      runtime: For a single logical call, retry attempts appear at only one span level.
+    remediation:
+      scope: local
+      guidance: >-
+        Choose the owning layer (typically the model gateway or the SDK client),
+        set the others' retry counts to zero explicitly, and document the
+        choice next to the configuration.
+    components: [model-gateway]
+    see_also: [EAS-05.09]
+    section: how-overload-becomes-an-outage
+
+  - id: EAS-05.09
+    title: Retry budgets and circuit breakers
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Each client MUST have a retry budget limiting retries to a fixed fraction
+      of its normal traffic, and MUST fail fast once the budget is spent. Each
+      dependency MUST be protected by a circuit breaker.
+    rationale: >-
+      Retry budgets are the limit that most directly separates a bad hour from
+      an outage.
+    evidence:
+      static: A retry budget (token bucket or ratio) and circuit breaker configuration for each model provider and tool backend.
+      runtime: Retry rate stays below the configured fraction during provider error spikes; breaker state transitions are visible in telemetry.
+    remediation:
+      scope: structural
+      guidance: Centralise model access behind a gateway that owns retries, budgets and breakers for all Workflows.
+    components: [model-gateway]
+    see_also: [EAS-05.08]
+    section: how-overload-becomes-an-outage
+
+  - id: EAS-05.10
+    title: Loop detection
+    level: L2
+    applies: All Workflows at rung `agent` or `multi_agent`.
+    requirement: >-
+      The orchestration layer MUST detect repeated identical tool calls (same
+      Tool, same normalised arguments) and repeating Step cycles, and MUST end
+      such Runs early with status `stuck` and an escalation, rather than
+      letting them consume their full budget.
+    rationale: >-
+      A stuck Run that ends quickly and tells a person is much better than one
+      that silently burns its limit and fails.
+    evidence:
+      static: Normalised-argument fingerprinting of tool calls and a repetition threshold in the orchestrator or a `tool.before` hook.
+      runtime: Runs with repeated identical calls end with `eas.run.status = stuck`.
+    remediation:
+      scope: local
+      guidance: Fingerprint each ToolRequest (tool name + canonicalised arguments) per Run and stop at a small repeat threshold.
+    hooks: [tool.before]
+    components: [orchestrator]
+    section: loops-are-a-normal-failure-not-an-exotic-one
+
+  - id: EAS-05.11
+    title: Token-based hierarchical quotas
+    level: L3
+    applies: Platforms where several Workflows or tenants share model capacity.
+    requirement: >-
+      All ModelCalls MUST pass through a gateway that enforces quotas measured
+      in tokens, allocated hierarchically (organisation, product, tenant, Run)
+      with guaranteed floors, borrowing, and priority classes that let
+      interactive work take precedence over background work.
+    rationale: >-
+      Model throughput is the scarce shared resource; it cannot be autoscaled
+      and must be scheduled.
+    evidence:
+      static: Model clients point at a gateway rather than directly at providers; quota configuration exists with hierarchy and priorities.
+      runtime: Every model span carries tenant and priority attributes; quota rejections are observable.
+      attested: How is model capacity allocated between products and tenants, and what happens when a tenant exceeds its share?
+    remediation:
+      scope: structural
+      guidance: Introduce a model gateway with token-denominated hierarchical quotas; route all model traffic through it.
+    components: [model-gateway]
+    section: model-capacity-is-a-shared-scarce-resource
+
+  - id: EAS-05.12
+    title: Queue-based admission
+    level: L3
+    applies: Platforms running Workflows at volume.
+    requirement: >-
+      Runs MUST be admitted through a durable queue from which workers pull
+      according to available capacity. When capacity is exhausted, work MUST
+      wait rather than fail; low-priority work MAY be refused at admission
+      with a clear status.
+    rationale: >-
+      Refusing work at admission is far better than accepting work that will
+      time out.
+    evidence:
+      static: Run creation enqueues durably; workers pull; admission control exists with priority-aware shedding.
+      runtime: Queue wait time is recorded; refusals carry an explicit status.
+    remediation:
+      scope: structural
+      guidance: Move Run execution behind a durable queue with capacity-aware workers; route non-urgent work to provider batch interfaces.
+    components: [scheduler]
+    section: model-capacity-is-a-shared-scarce-resource
+
+  - id: EAS-05.13
+    title: Spend as an alarm
+    level: L2
+    applies: All Workflows in production.
+    requirement: >-
+      Spend per Workflow and per tenant MUST be tracked against a baseline, and
+      exceeding a configured multiple of that baseline MUST page an owner and
+      pause new Runs of the affected Workflow until a person intervenes.
+    rationale: >-
+      A prompt edit, routing change or new tool can multiply cost without any
+      error; the first signal should not be the monthly invoice.
+    evidence:
+      static: Alert rules on cost per Workflow and tenant with an automated pause action.
+      runtime: Hourly cost per Workflow and tenant is derivable from telemetry.
+      attested: Who is paged when a Workflow's spend exceeds its baseline, and what pauses automatically?
+    remediation:
+      scope: local
+      guidance: Derive hourly cost per Workflow from `eas.cost.usd`, alert at a baseline multiple, and wire the alert to the kill switch (EAS-10.02).
+    components: [telemetry-pipeline, release-control]
+    see_also: [EAS-10.02]
+    section: spend-as-an-alarm
+
+  - id: EAS-05.14
+    title: Planned degradation
+    level: L3
+    applies: Platforms running Workflows at volume.
+    requirement: >-
+      The platform MUST define a degradation order in advance (for example:
+      shed background work, reduce low-priority tenants to their floor, shrink
+      context, route to evaluated smaller models, queue interactive work with
+      honest status). A Run MUST NOT be shed partway through its side effects;
+      capacity for in-flight Runs MUST be reserved before new work is admitted.
+    rationale: >-
+      Degradation decided during an incident is improvised; a Run abandoned
+      between two side effects leaves the world half-changed.
+    evidence:
+      attested: What is the documented degradation order, and how does admission protect Runs with in-flight side effects?
+      static: Admission logic distinguishes Runs with committed but unexecuted ActionIntents.
+    remediation:
+      scope: structural
+      guidance: Document the degradation order as a runbook and encode in-flight protection in the scheduler.
+    components: [scheduler, model-gateway]
+    section: degrading-on-purpose

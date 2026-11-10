@@ -1,12 +1,19 @@
 ---
 layout: default
+section: Essays
 ---
 {% assign articles = site.pages | where: "layout", "post" | sort: "order" %}
 {% for a in articles %}{% if a.url == page.url %}{% assign idx = forloop.index0 %}{% endif %}{% endfor %}
+{% assign dom = site.pages | where: "layout", "controls" | where: "order", page.order | first %}
 <p class="kicker">{% if page.order == 0 %}Introduction{% else %}Principle {{ page.order }} of 12{% endif %}</p>
 <article>
   {{ content }}
 </article>
+{% if dom %}{% assign d = site.data.controls[dom.domain] %}
+<aside class="spec-link">
+  <p><strong>In the specification:</strong> this principle is domain <a href="{{ dom.url | relative_url }}">{{ d.domain }} {{ d.title }}</a>, with {{ d.controls.size }} testable controls.</p>
+</aside>
+{% endif %}
 <nav class="pager">
   {% if idx > 0 %}{% assign prev_idx = idx | minus: 1 %}{% assign prev = articles[prev_idx] %}
   <a class="prev" href="{{ prev.url | relative_url }}"><span>Previous</span>{{ prev.title }}</a>

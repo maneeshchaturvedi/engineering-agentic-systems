@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Delegate Identity, Narrow Scope"
+redirect_from: /06-delegate-identity-narrow-scope.html
 order: 6
 ---
 

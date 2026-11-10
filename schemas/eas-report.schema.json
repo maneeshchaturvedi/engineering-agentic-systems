@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maneeshchaturvedi.github.io/engineering-agentic-systems/schemas/eas-report.schema.json",
+  "title": "EAS Assessment Report",
+  "type": "object",
+  "required": ["eas_version", "assessed_at", "assessor", "subject", "scope", "results", "findings", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "eas_version": { "type": "string" },
+    "assessed_at": { "type": "string", "format": "date-time" },
+    "assessor": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "automated": { "type": "boolean" },
+        "calibration_ref": { "type": "string", "description": "Precision/recall per control for automated assessors." }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "required": ["workflow", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "workflow": { "type": "string" },
+        "version": { "type": "string" },
+        "repository": { "type": "string" },
+        "commit": { "type": "string" },
+        "manifest": { "type": "string" },
+        "profile": { "type": "string" },
+        "profile_version": { "type": "string" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["required_level"],
+      "additionalProperties": false,
+      "properties": {
+        "declared_tier": { "enum": ["T1", "T2", "T3", null] },
+        "derived_tier": { "enum": ["T1", "T2", "T3"] },
+        "required_level": { "$ref": "#/$defs/level" },
+        "target_level": { "$ref": "#/$defs/level" },
+        "trace_sample": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "from": { "type": "string", "format": "date-time" }, "to": { "type": "string", "format": "date-time" }, "runs": { "type": "integer" } }
+        }
+      }
+    },
+    "inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool"],
+        "additionalProperties": false,
+        "properties": {
+          "tool": { "type": "string" },
+          "assessed": { "type": "object", "description": "Attributes as assessed from the implementation (same shape as a manifest tool)." },
+          "declared": { "type": ["object", "null"] },
+          "differences": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["control", "verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "control": { "$ref": "#/$defs/control_id" },
+          "verdict": { "enum": ["met", "partial", "not_met", "not_applicable", "unknown", "excepted"] },
+          "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "control", "verdict", "severity", "title", "evidence", "remediation"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "control": { "$ref": "#/$defs/control_id" },
+          "verdict": { "enum": ["partial", "not_met", "unknown"] },
+          "severity": { "enum": ["critical", "high", "medium", "low"] },
+          "title": { "type": "string" },
+          "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+          "remediation": {
+            "type": "object",
+            "required": ["scope", "summary"],
+            "additionalProperties": false,
+            "properties": {
+              "scope": { "enum": ["local", "structural"] },
+              "summary": { "type": "string" },
+              "patch": { "type": "string", "description": "Unified diff, for local remediation." },
+              "plan": {
+                "type": "object",
+                "description": "For structural remediation.",
+                "additionalProperties": false,
+                "properties": {
+                  "target_components": { "type": "array", "items": { "type": "string" } },
+                  "affected": { "type": "array", "items": { "type": "string" } },
+                  "steps": { "type": "array", "items": { "type": "string" } },
+                  "interim_control": { "type": "string" }
+                }
+              },
+              "verifies_with": { "type": "string", "description": "Test, query or trace assertion that will show the control is met." }
+            }
+          },
+          "related": { "type": "array", "items": { "$ref": "#/$defs/control_id" } }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "by_verdict": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "highest_level_met": { "enum": ["none", "L1", "L2", "L3"] },
+        "claim": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "level": { "enum": ["L1", "L2", "L3"] },
+    "control_id": { "type": "string", "pattern": "^EAS-(0[1-9]|1[0-2])\\.[0-9]{2}$" },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["declared", "static", "runtime", "attested"] },
+        "ref": { "type": "string", "description": "file:line, manifest JSON pointer, span/trace ID, or questionnaire answer ID." },
+        "detail": { "type": "string" },
+        "searched": { "type": "string", "description": "For absence: what was searched and where." },
+        "drift": { "type": "boolean" }
+      }
+    }
+  }
+}

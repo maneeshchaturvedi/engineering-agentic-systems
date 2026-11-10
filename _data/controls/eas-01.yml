@@ -1,0 +1,188 @@
+domain: EAS-01
+order: 1
+slug: pattern-selection
+title: Pattern Selection
+essay: 01-use-the-simplest-pattern-that-works
+summary: >-
+  Every Workflow uses the lowest rung on the autonomy ladder that meets its
+  requirements, states that rung explicitly, and justifies in writing and with
+  evidence every climb above a fixed workflow. Rules that must be exactly right
+  are code, never model judgement.
+
+controls:
+  - id: EAS-01.01
+    title: Declared pattern rung
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Workflow MUST declare its rung on the autonomy ladder (`code`,
+      `single_call`, `fixed_workflow`, `agent`, `multi_agent`), and the
+      declared rung MUST match the implementation. A Workflow declared at
+      `single_call` MUST NOT loop or let the model select Tools; a Workflow
+      declared at `fixed_workflow` MUST have control flow fixed in code, with
+      the model invoked only at predetermined Steps; a Workflow in which a
+      model chooses Tools in a loop MUST be declared `agent` or higher.
+    rationale: >-
+      Each rung includes the costs of the ones below it and adds its own in
+      reliability, latency, cost, testability and debuggability. The rung has to
+      be named before those costs can be weighed, and a system that has
+      drifted up the ladder unnoticed pays them without having chosen to.
+    evidence:
+      declared: "`rung` is set for every Workflow in the manifest."
+      static: >-
+        The control flow in code matches the declared rung: no model-driven
+        tool loop in a `single_call` or `fixed_workflow` Workflow; no
+        sub-agents, handoffs or agent-as-tool constructs in a Workflow declared
+        below `multi_agent`.
+      runtime: >-
+        For `single_call` Workflows, every Run has exactly one ModelCall span
+        and no `execute_tool` spans. For Workflows below `multi_agent`,
+        `eas.actor_chain` never contains more than one agent identity.
+    remediation:
+      scope: local
+      guidance: >-
+        Add `rung` to the manifest for each Workflow. Where the declared and
+        implemented rungs differ, either correct the declaration (and meet
+        EAS-01.02) or simplify the implementation to the declared rung.
+    components: [orchestrator]
+    see_also: [EAS-01.02]
+    section: a-ladder-not-a-menu
+
+  - id: EAS-01.02
+    title: Written justification for agent and multi-agent rungs
+    level: L1
+    applies: All Workflows at rung `agent` or `multi_agent`.
+    requirement: >-
+      Every Workflow at rung `agent` or `multi_agent` MUST have a written
+      justification that names the specific requirement the next rung down
+      cannot meet. Generic benefits ("more flexible", "the model might find a
+      better path") MUST NOT be accepted as justification. The justification
+      SHOULD be reviewed as part of architecture review.
+    rationale: >-
+      Teams over-build because the agentic version is more interesting and
+      demos better, while its costs stay invisible until production. Asking
+      "why not the simpler pattern?" in writing makes those costs visible at
+      the point of decision.
+    evidence:
+      declared: "`rung_justification` is present and non-empty for every Workflow at rung `agent` or `multi_agent`."
+      attested: >-
+        What specific requirement can the lower rung not meet? A valid answer
+        names a concrete property of the problem (for example, the number and
+        order of lookups depends on what earlier lookups return, with too many
+        combinations to enumerate), not a general benefit of autonomy. Who
+        reviewed the justification?
+    remediation:
+      scope: local
+      guidance: >-
+        Write a short design note answering "why not the simpler pattern?" and
+        record its conclusion in `rung_justification`. If no concrete
+        requirement can be named, move the Workflow down a rung.
+    see_also: [EAS-01.01, EAS-01.05]
+    section: the-test-for-climbing-a-rung
+
+  - id: EAS-01.03
+    title: Deterministic policy responses
+    level: L1
+    applies: All Workflows that use a model.
+    requirement: >-
+      Logic that is known and must be exactly right (eligibility rules,
+      routing tables, compliance checks, calculations, and legally required
+      actions such as honouring an unsubscribe) MUST be implemented in
+      deterministic code. A model MAY interpret unstructured input into a
+      structured result (for example a classification against a schema), but
+      the policy response to that result MUST be selected by code, not by
+      model judgement.
+    rationale: >-
+      A model that is right ninety-eight percent of the time adds an error
+      rate to a problem that previously had none. In the reply-handling
+      example, understanding the reply is the model's job; deciding what to do
+      about an unsubscribe is the part that must never be wrong, so it belongs
+      to code.
+    evidence:
+      static: >-
+        For each business rule the Workflow applies, locate where the decision
+        is made. Rules decided by a prompt instruction or by the model's choice
+        of Tool, rather than by code branching on a structured model output, are
+        findings. Routing from classification labels to handlers is a
+        deterministic table or branch with unit tests.
+      attested: >-
+        Which outcomes of this Workflow are legally required or must be exactly
+        right, and where in code is each one decided?
+    remediation:
+      scope: local
+      guidance: >-
+        Split the model's role into interpretation only: have it return a
+        schema-constrained label or extraction, and move the policy response
+        into a deterministic routing step with unit tests. Add a new label and
+        route when a new category emerges.
+    components: [orchestrator, policy-engine]
+    see_also: [EAS-04.01]
+    section: a-worked-example-handling-replies
+
+  - id: EAS-01.04
+    title: Justified agent boundaries in multi-agent designs
+    level: L2
+    applies: All Workflows at rung `multi_agent`.
+    requirement: >-
+      Every boundary between agents in a `multi_agent` Workflow MUST be
+      justified by at least one of: context isolation, permission separation,
+      genuine parallelism of independent sub-problems, or independent
+      ownership by different teams. A split that mirrors human roles
+      (researcher, writer, manager) without one of these reasons MUST NOT be
+      accepted as justification.
+    rationale: >-
+      Each hand-off between agents is a lossy compression of context, each
+      added agent multiplies tokens and latency, and errors compound across
+      hops. Only these four reasons repay that cost; role-play describes an org
+      chart, not a technical requirement.
+    evidence:
+      declared: "Every entry in `agents[]` carries a `boundary_reason` (`context_isolation`, `permission_separation`, `parallelism` or `independent_ownership`)."
+      static: >-
+        Each sub-agent's construction shows the claimed reason: a compact
+        return contract (context isolation), a distinct and narrower tool set
+        or credential (permission separation), concurrent execution
+        (parallelism), or a separately versioned component owned by another
+        team (independent ownership).
+      runtime: >-
+        Every agent identity appearing in `eas.actor_chain` corresponds to a
+        sub-agent named in the justification.
+      attested: For each agent boundary, what would break or degrade if the two agents were merged?
+    remediation:
+      scope: structural
+      guidance: >-
+        Merge agents whose boundary has no qualifying reason into a single
+        agent or a fixed workflow step; keep the boundaries that isolate
+        context or separate permissions.
+    components: [orchestrator]
+    see_also: [EAS-01.02, EAS-06.04, EAS-07.09, EAS-08.07]
+    section: when-multiple-agents-are-justified
+
+  - id: EAS-01.05
+    title: Comparative evidence for climbing a rung
+    level: L3
+    applies: All Workflows at rung `agent` or `multi_agent`.
+    requirement: >-
+      Before a Workflow is placed at rung `agent` or `multi_agent`, a
+      lower-rung version MUST be built and both versions MUST be evaluated on
+      the same EvalSuite, comparing task success, cost and failure modes. The
+      higher rung MUST be retained only if the comparison shows it meets a
+      requirement the lower rung does not.
+    rationale: >-
+      When a team is convinced its problem needs autonomy, an experiment
+      settles the question better than argument. The constrained version
+      often matches the agent on quality at a fraction of the cost.
+    evidence:
+      declared: "`evaluation.suite` and `evaluation.dataset_version` identify the suite used for the comparison."
+      attested: >-
+        Where is the comparison report? It shows both versions run on the same
+        suite and dataset version, with task success, cost per Run and a
+        breakdown of failure modes for each.
+    remediation:
+      scope: structural
+      guidance: >-
+        Build the simpler variant (typically a fixed workflow with model steps)
+        against the existing EvalSuite and record the comparison alongside the
+        rung justification.
+    components: [eval-platform]
+    see_also: [EAS-01.02, EAS-10.04, EAS-11.04]
+    section: restraint-as-a-platform-property

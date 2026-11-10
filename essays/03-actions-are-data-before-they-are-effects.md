@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Actions Are Data Before They Are Effects"
+redirect_from: /03-actions-are-data-before-they-are-effects.html
 order: 3
 ---
 

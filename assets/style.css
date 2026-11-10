@@ -44,3 +44,76 @@ code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; font-
   color: var(--muted); font-family: system-ui, sans-serif; font-size: .85rem;
 }
 @media (max-width: 600px) { body { font-size: 17px; } h1 { font-size: 1.6rem; } }
+
+/* ---- companion site: navigation, docs, spec ---- */
+:root { --tint: #f4f2ed; --l1: #1a7f37; --l2: #9a6700; --l3: #8250df;
+        --plane-control: #eef3fb; --plane-run: #f3f7ee; --plane-trust: #fbf1ee; --plane-data: #f1eff8; --plane-ext: #f2f2f2; }
+@media (prefers-color-scheme: dark) {
+  :root { --tint: #1d2025; --l1: #4ac26b; --l2: #d4a72c; --l3: #a371f7;
+          --plane-control: #18202c; --plane-run: #1a2219; --plane-trust: #2a1d1a; --plane-data: #1f1c29; --plane-ext: #202226; }
+}
+.site-nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.site-nav a { color: var(--muted); text-decoration: none; }
+.site-nav a:hover, .site-nav a[aria-current] { color: var(--fg); }
+.site-nav a[aria-current] { font-weight: 600; }
+body.doc .site-header, body.doc main, body.doc .site-footer { max-width: 60rem; }
+body.doc { font-size: 17px; }
+body.doc article { overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; margin: 1.25rem 0; font-family: system-ui, -apple-system, sans-serif; font-size: .85rem; line-height: 1.45; display: block; overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); }
+thead th { border-bottom: 2px solid var(--rule); }
+tfoot th { border-top: 2px solid var(--rule); border-bottom: none; }
+pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; font-size: .8rem; line-height: 1.5; }
+pre code { background: none; padding: 0; font-size: inherit; }
+h3 { font-size: 1.05rem; margin-top: 2rem; }
+.lede { font-size: 1.1rem; }
+.meta, .status, .refs, .applies { font-family: system-ui, -apple-system, sans-serif; font-size: .85rem; color: var(--muted); }
+.status { border-left: 3px solid var(--accent); padding-left: .75rem; }
+.lvl { display: inline-block; font: 600 .7rem/1 system-ui, sans-serif; padding: .25em .5em; border-radius: 999px; border: 1px solid currentColor; vertical-align: middle; }
+.lvl.l1 { color: var(--l1); } .lvl.l2 { color: var(--l2); } .lvl.l3 { color: var(--l3); }
+.control { border-top: 1px solid var(--rule); margin-top: 2.25rem; padding-top: .25rem; scroll-margin-top: 1rem; }
+.control h2 { font-size: 1.15rem; margin-top: 1rem; }
+.cid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); font-weight: 500; margin-right: .3rem; }
+.requirement { background: var(--tint); border-left: 3px solid var(--accent); padding: .1rem 1rem; border-radius: 0 6px 6px 0; }
+.rationale, .remediation { font-size: .95rem; }
+.scope { font: 600 .7rem system-ui, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+dl.evidence { display: grid; grid-template-columns: 6.5rem 1fr; gap: .4rem 1rem; font-size: .92rem; margin: 1rem 0; }
+dl.evidence dt { font: 600 .72rem system-ui, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-top: .25rem; }
+dl.evidence dd { margin: 0; }
+@media (max-width: 600px) { dl.evidence { grid-template-columns: 1fr; } dl.evidence dd { margin-bottom: .5rem; } }
+.tag { font: 600 .7rem system-ui, sans-serif; text-decoration: none; color: var(--muted); border: 1px solid var(--rule); border-radius: 4px; padding: .1em .4em; margin-left: .35rem; }
+.spec-link { margin-top: 2.5rem; padding: .75rem 1rem; background: var(--tint); border-radius: 6px; font-family: system-ui, sans-serif; font-size: .9rem; }
+.spec-link p { margin: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; margin: 2rem 0; }
+.card { display: flex; flex-direction: column; gap: .35rem; padding: 1rem 1.1rem; border: 1px solid var(--rule); border-radius: 8px; text-decoration: none; color: var(--fg); font-family: system-ui, sans-serif; font-size: .9rem; line-height: 1.45; }
+.card:hover { border-color: var(--accent); }
+.card strong { font-size: 1.05rem; }
+.card-kicker { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.component { border-top: 1px solid var(--rule); scroll-margin-top: 1rem; }
+.component h3 { margin-top: 1.25rem; }
+.plane { font: 500 .75rem system-ui, sans-serif; color: var(--muted); margin-left: .5rem; }
+.component .refs a { margin-right: .35rem; white-space: nowrap; }
+.component:target, .control:target { background: var(--tint); }
+
+/* blueprint diagram */
+figure.diagram { margin: 2rem 0; }
+.diagram-scroll { overflow-x: auto; }
+svg.bp { display: block; width: 100%; min-width: 760px; height: auto; font-family: system-ui, -apple-system, sans-serif; }
+.bp-plane { stroke: var(--rule); }
+.bp-plane.control { fill: var(--plane-control); } .bp-plane.run { fill: var(--plane-run); }
+.bp-plane.trust { fill: var(--plane-trust); } .bp-plane.data { fill: var(--plane-data); } .bp-plane.ext { fill: var(--plane-ext); }
+.bp-plane-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; fill: var(--muted); }
+.bp-box rect { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+.bp-box.core rect { stroke: var(--accent); stroke-width: 2; }
+.bp-box.ext-actor rect, .bp-box.sor rect { stroke-dasharray: 5 4; }
+.bp-box .n { font-size: 14px; font-weight: 600; fill: var(--fg); }
+.bp-box.ext-actor .n, .bp-box.sor .n { font-weight: 500; }
+.bp-box .s { font-size: 11px; fill: var(--muted); }
+a:hover .bp-box rect, a:focus .bp-box rect { stroke: var(--accent); stroke-width: 2.4; }
+.bp-wall rect { fill: var(--plane-trust); stroke: var(--muted); stroke-width: 1.2; }
+.bp-wall text { font-size: 12px; font-weight: 600; fill: var(--fg); }
+.bp-edge path { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.bp-edge path.dash { stroke-dasharray: 5 4; }
+.bp-head { fill: var(--muted); }
+.bp-edge-label text { font-size: 10.5px; fill: var(--muted); }
+figcaption { font-family: system-ui, sans-serif; font-size: .82rem; color: var(--muted); margin-top: .6rem; }

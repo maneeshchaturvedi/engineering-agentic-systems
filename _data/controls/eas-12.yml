@@ -1,0 +1,353 @@
+domain: EAS-12
+order: 12
+slug: observability
+title: Governed Observability
+essay: 12-observability-data-is-sensitive-data
+summary: >-
+  Agent Traces are designed twice: once to be useful for debugging,
+  evaluation, cost and audit, and once to be governed as the copy of customer
+  data they are, with redaction before export, controlled access, and
+  deletion that reaches every copy.
+
+controls:
+  - id: EAS-12.01
+    title: Structured trace tree with common schema
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every Run MUST emit a Trace structured as a tree (Run, Steps, and the
+      ModelCalls and ToolCalls beneath the Step that made them) using the EAS
+      telemetry conventions. Run spans MUST carry Run identifier, tenant,
+      Workflow and version; ModelCall spans model, token counts, latency and
+      cost; ToolCall spans Tool, result size and error; PolicyDecisions MUST
+      be recorded at each boundary.
+    rationale: >-
+      A privacy-safe trace that cannot diagnose anything protects nobody, and
+      a common schema is what makes cross-Workflow questions answerable
+      without bespoke work.
+    evidence:
+      declared: "`observability.exporter` names an OpenTelemetry-compatible exporter."
+      static: >-
+        Instrumentation that creates `eas.run`, `eas.step`, model and
+        `execute_tool` spans with parent-child relationships. Not satisfied
+        by: flat logs per call; per-team attribute names that differ from the
+        conventions.
+      runtime: >-
+        Every `eas.run` span carries `eas.run.id`, `eas.tenant.id`,
+        `eas.workflow.id` and `eas.workflow.version`; every model span is a
+        descendant of an `eas.step` and carries `gen_ai.request.model`,
+        `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` and
+        `eas.cost.usd`; every `execute_tool` span carries `gen_ai.tool.name`
+        and `eas.tool.output_tokens`.
+    remediation:
+      scope: local
+      guidance: >-
+        Adopt the framework's OpenTelemetry GenAI instrumentation and add the
+        `eas.*` attributes in a shared span processor rather than per Tool.
+    hooks: [run.start, model.after, tool.after, run.end]
+    components: [telemetry-pipeline]
+    section: what-to-capture
+
+  - id: EAS-12.02
+    title: No unredacted personal data exported
+    level: L1
+    applies: All Workflows that handle personal data.
+    requirement: >-
+      Personal data (names, email addresses, phone numbers, account
+      identifiers, free-text fields likely to contain them) MUST NOT leave
+      the agent's process in telemetry. Either redaction MUST run in-process
+      before export, or payload capture MUST be disabled.
+    rationale: >-
+      Traces are a copy of everything the agent touched, and are usually
+      stored with far less care than the systems they were copied from; the
+      most effective control is to reduce what they contain before they leave
+      the process.
+    evidence:
+      declared: "`observability.redaction` is set, or `observability.payload_capture` is disabled."
+      static: >-
+        A redaction span processor registered ahead of the exporter in the
+        agent process. Not satisfied by: redaction configured in the
+        downstream collector or tracing vendor; framework defaults that
+        capture prompts and completions with no processor in place.
+      runtime: >-
+        No exported span has `eas.payload.captured = true` without
+        `eas.redaction.applied = true` and an `eas.redaction.policy` value;
+        principals' personal identifiers never appear in clear text in any
+        attribute.
+    remediation:
+      scope: local
+      guidance: >-
+        Disable payload capture immediately; then add an in-process redaction
+        processor before the exporter and re-enable capture per EAS-12.04.
+    components: [telemetry-pipeline]
+    see_also: [EAS-12.05]
+    section: redact-before-anything-leaves-the-process
+
+  - id: EAS-12.03
+    title: Metrics by version
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Metrics MUST be derived from Traces and broken down by Workflow, tenant
+      and version: reliability (share of Runs succeeding, failing
+      unrecoverably or stuck; latency to first useful output and to
+      completion; queue wait time), production quality signals (policy
+      rejections, escalations, user corrections or retries, grounding-check
+      failures) and cost (tokens and currency per Run and per successful
+      outcome). Cost anomalies MUST raise alerts.
+    rationale: >-
+      Breaking every metric down by version is what makes regressions
+      attributable; without it a bad release shows up as a vague
+      deterioration nobody can pin on a cause.
+    evidence:
+      static: Dashboard and alert definitions grouped by `eas.workflow.version`, covering each metric family.
+      runtime: >-
+        Distributions of `eas.run.status`, counts of `eas.policy.decision`
+        by value, and sums of `eas.cost.usd` are derivable per
+        `eas.workflow.id`, `eas.workflow.version` and `eas.tenant.id`.
+      attested: Produce the dashboard showing the current and previous version side by side, and the cost anomaly alert rule.
+    remediation:
+      scope: local
+      guidance: >-
+        Build the metric set from span attributes with version as a mandatory
+        dimension, and add anomaly alerts on cost per Run.
+    components: [telemetry-pipeline]
+    see_also: [EAS-10.09, EAS-11.03, EAS-05.13]
+    section: what-to-capture
+
+  - id: EAS-12.04
+    title: Tiered payload capture
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Metadata (timings, token counts, models, Tools called, outcomes, costs)
+      MUST be retained for every Run. Full payloads MUST be retained
+      selectively: for every error, policy rejection, escalation, Run on a
+      canary version, and user-flagged Run, plus a random sample of all
+      other Runs. Recent Traces SHOULD be held in an interactive tool with
+      short retention and the remainder archived in governed storage the
+      organisation controls, partitioned by tenant and date.
+    rationale: >-
+      Full payloads at production volume are very large and expensive in
+      volume-priced tools; tiering keeps the small metadata that supports
+      aggregate analysis and the payloads that matter, with a random sample so
+      analysis is not biased towards failures.
+    evidence:
+      declared: "`observability.payload_capture` is `tiered` and `observability.payload_sample_rate` is set."
+      static: A sampling or capture policy in the telemetry pipeline keyed on error, policy, escalation, canary and flag conditions plus a random rate.
+      runtime: >-
+        Every span with `eas.payload.captured = true` carries an
+        `eas.payload.capture_reason`; every `eas.policy` span with
+        `eas.policy.decision` of `deny` or `escalate` belongs to a Run with
+        captured payloads; some captured Runs have reason `sample`.
+    remediation:
+      scope: local
+      guidance: >-
+        Make the capture decision at Run end from its status and decisions,
+        and archive captured payloads in tenant- and date-partitioned storage.
+    hooks: [run.end]
+    components: [telemetry-pipeline]
+    see_also: [EAS-12.02, EAS-12.08]
+    section: estimate-the-volume-before-choosing-the-tools
+
+  - id: EAS-12.05
+    title: Tokenised redaction with a vault
+    level: L2
+    applies: All Workflows that capture payloads containing personal data.
+    requirement: >-
+      Redaction MUST replace personal data with tokens referring to entries
+      in a secure vault, so that the tracing system receives only tokens.
+      Re-identification MUST go through a controlled process that records who
+      looked and why.
+    rationale: >-
+      Engineers can see the structure of what happened without the real
+      values; and deleting a person's vault entries makes every token
+      referring to them meaningless, wherever the Trace has been copied.
+    evidence:
+      static: >-
+        The redaction processor calls a vault to tokenise detected values;
+        vault access controls and an audit log for detokenisation. Not
+        satisfied by: irreversible masking only (acceptable for EAS-12.02 but
+        not this control); a vault whose detokenisation is not audited.
+      attested: Produce the detokenisation audit log for the last month and the procedure for requesting a real value.
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce a PII vault with consistent tokens per value and route all
+        re-identification through an audited request flow.
+    components: [pii-vault, telemetry-pipeline]
+    see_also: [EAS-12.02, EAS-12.09]
+    section: redact-before-anything-leaves-the-process
+
+  - id: EAS-12.06
+    title: Trace access governed like customer data
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Access to Traces MUST be restricted to the team that owns the Workflow.
+      Cross-tenant access MUST be restricted and logged. Access for
+      investigating a specific customer's issue MUST be time-limited, granted
+      for that purpose and revoked afterwards.
+    rationale: >-
+      Traces are copies of customer data, so the access rules that would be
+      unremarkable for a production database apply; they need stating because
+      they are unusual for an observability stack.
+    evidence:
+      static: Access-control configuration of the tracing backend and archive scoped by Workflow owner and tenant; a just-in-time access mechanism with expiry.
+      attested: Who can read Traces for this Workflow today, and how is time-limited support access granted and revoked? Produce the access log for a recent grant.
+    remediation:
+      scope: structural
+      guidance: >-
+        Scope tracing projects or datasets per Workflow owner, partition by
+        tenant, and replace standing broad access with expiring grants.
+    components: [telemetry-pipeline, data-governance]
+    section: access-to-traces-is-access-to-customer-data
+
+  - id: EAS-12.07
+    title: Data inventory covers all copies
+    level: L2
+    applies: All Workflows that handle personal data.
+    requirement: >-
+      An inventory MUST list every store that holds data derived from Runs:
+      Traces, Checkpoints, memory, search and vector indexes, eval datasets,
+      prompt and response caches, the model provider's retention, and ad-hoc
+      copies (notebooks, tickets, local files). Each entry MUST state what it
+      holds, its retention, and how deletion reaches it.
+    rationale: >-
+      Agent systems copy data into many places, and the right to deletion
+      does not exempt logs; the most often forgotten copies are the ones
+      engineers paste while debugging.
+    evidence:
+      static: A data inventory document or catalogue entry per Workflow covering each store category.
+      attested: >-
+        Produce the inventory. What is the model provider's retention for
+        this Workflow, and what policy governs pasting Traces into tickets
+        and notebooks?
+    remediation:
+      scope: local
+      guidance: >-
+        Enumerate stores from the manifest (`state`, `memory`,
+        `context.sources`, `observability`, `evaluation`) plus provider terms
+        and ad-hoc copies, and assign an owner to each.
+    components: [data-governance]
+    see_also: [EAS-12.09]
+    section: deletion-has-to-reach-traces-too
+
+  - id: EAS-12.08
+    title: Records tagged with tenant and data subjects; retention per tier
+    level: L2
+    applies: All Workflows that handle personal data.
+    requirement: >-
+      Every record in a store holding Run-derived data MUST be labelled with
+      its tenant and the data subjects it concerns at write time, so deletion
+      is a lookup rather than a search. Each storage tier MUST have a defined
+      retention period, and records SHOULD hold references instead of copies
+      where possible.
+    rationale: >-
+      Tagging at write turns deletion into a lookup, and minimising what is
+      stored, with short retention for interactive tools, reduces what must be
+      found and removed.
+    evidence:
+      declared: "`observability.retention_days` (interactive tier) and `observability.archive_retention_days` are set."
+      static: >-
+        Write paths for traces, Checkpoints, memory and indexes attach tenant
+        and data-subject tags (as tokens, not clear values); retention or
+        lifecycle policies configured on each store. Not satisfied by: tenant
+        tags without data-subject tags; retention configured on the tracing
+        tool but not the archive.
+      runtime: Every exported span carries `eas.tenant.id`.
+    remediation:
+      scope: local
+      guidance: >-
+        Add tenant and subject tags in shared write paths (span processor,
+        `state.checkpoint` and `memory.write` hooks) and set lifecycle rules
+        on every store.
+    hooks: [state.checkpoint, memory.write]
+    components: [telemetry-pipeline, state-store, memory-store, data-governance]
+    see_also: [EAS-12.07, EAS-12.09]
+    section: deletion-has-to-reach-traces-too
+
+  - id: EAS-12.09
+    title: Tracked, verified deletion
+    level: L3
+    applies: All Workflows that handle personal data under deletion obligations.
+    requirement: >-
+      A deletion request MUST create a tracked job that fans out to every
+      store in the inventory, confirms the data is gone by checking for it,
+      and records evidence that it did. Stores that delete eventually rather
+      than immediately MUST have the delay known, documented and within legal
+      limits.
+    rationale: >-
+      Deletion must reach traces and every other copy; a fan-out that is not
+      verified cannot show that it did, and eventual deletion in some table
+      formats leaves rows in older files until compaction runs.
+    evidence:
+      static: A deletion service or job definition that enumerates inventory stores, performs a post-deletion lookup, and writes a completion record.
+      attested: >-
+        Produce the record of a recent deletion request showing each store,
+        the verification result and the timestamp, and the documented delays
+        for eventually-deleting stores.
+    remediation:
+      scope: structural
+      guidance: >-
+        Build deletion as a workflow over the inventory with per-store
+        delete-and-verify steps; deleting vault entries (EAS-12.05) covers
+        tokenised copies.
+    components: [data-governance, pii-vault]
+    see_also: [EAS-12.05, EAS-12.07, EAS-12.08]
+    section: deletion-has-to-reach-traces-too
+
+  - id: EAS-12.10
+    title: Per-tenant encryption keys
+    level: L3
+    applies: Multi-tenant platforms holding sensitive Run-derived data.
+    requirement: >-
+      Sensitive fields in stores holding Run-derived data MUST be encrypted
+      with keys held per tenant, so that removing a tenant can be done by
+      destroying its key.
+    rationale: >-
+      Data copied into many stores is hard to delete exhaustively;
+      destroying a tenant's key renders every copy encrypted under it
+      unreadable.
+    evidence:
+      static: Key-management configuration with a key per tenant and field-level or envelope encryption in Trace archive, state, memory and index write paths.
+      attested: What is the procedure for destroying a tenant's key, and which stores does it cover?
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce envelope encryption with per-tenant data keys in the shared
+        write paths for each store.
+    components: [data-governance, state-store, memory-store, telemetry-pipeline]
+    see_also: [EAS-12.09]
+    section: deletion-has-to-reach-traces-too
+
+  - id: EAS-12.11
+    title: Privacy-safe eval datasets
+    level: L2
+    applies: All EvalSuites built from production data.
+    requirement: >-
+      Eval datasets built from production Traces SHOULD be made from redacted
+      or synthetic versions of real cases, with personal details replaced by
+      consistent placeholders. Where real data is retained, each case MUST be
+      tagged with its data subjects so it can be removed, and a removal MUST
+      be recorded as a dataset version change.
+    rationale: >-
+      Eval datasets are deliberately permanent and built from production
+      Traces, so they need to remain useful without containing anyone's data,
+      and removing a case changes the baseline.
+    evidence:
+      static: >-
+        Dataset build pipeline applies the redaction policy; case metadata
+        carries a `contains_personal_data` flag and subject tags for any
+        unredacted case. Not satisfied by: raw Trace payloads copied into
+        eval files.
+      attested: How many cases in the current dataset contain real personal data, and how would one be removed on request?
+    remediation:
+      scope: local
+      guidance: >-
+        Run dataset construction through the same tokenising redaction as
+        Traces, with consistent placeholders, and bump the dataset version on
+        any removal.
+    components: [eval-platform, data-governance]
+    see_also: [EAS-10.03, EAS-12.07]
+    section: deletion-has-to-reach-traces-too

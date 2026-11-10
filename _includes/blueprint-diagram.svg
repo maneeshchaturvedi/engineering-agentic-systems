@@ -1,0 +1,135 @@
+<svg class="bp" viewBox="0 0 1210 680" role="img" aria-labelledby="bp-title bp-desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="bp-title">EAS reference architecture</title>
+  <desc id="bp-desc">Components of a mature agentic platform arranged in five planes. A Run is admitted by the scheduler with a per-Run credential, the orchestrator consults models through the model gateway, every ToolRequest passes the tool gateway and policy engine, effectful requests become ActionIntents in the action ledger, and a separate executor performs them through the egress proxy. Checkpoints, memory, telemetry and outcomes are kept in the data plane; release control and evaluation gate change.</desc>
+  <defs>
+    <marker id="bp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="bp-head"/>
+    </marker>
+  </defs>
+
+  <!-- planes -->
+  <rect class="bp-plane control" x="205" y="20" width="610" height="122" rx="10"/>
+  <text class="bp-plane-label" x="217" y="40">CONTROL PLANE · change &amp; governance</text>
+  <rect class="bp-plane trust" x="15" y="160" width="180" height="500" rx="10"/>
+  <text class="bp-plane-label" x="27" y="180">TRUST</text>
+  <rect class="bp-plane run" x="205" y="160" width="610" height="340" rx="10"/>
+  <text class="bp-plane-label" x="330" y="180">RUN PLANE · the model proposes, code disposes</text>
+  <rect class="bp-plane data" x="205" y="520" width="800" height="140" rx="10"/>
+  <text class="bp-plane-label" x="217" y="540">DATA PLANE · governed state &amp; evidence</text>
+  <rect class="bp-plane ext" x="1040" y="160" width="160" height="340" rx="10"/>
+  <text class="bp-plane-label" x="1052" y="180">OUTSIDE</text>
+
+  <!-- egress proxy wall -->
+  <a href="#egress-proxy"><g class="bp-wall">
+    <rect x="995" y="185" width="32" height="290" rx="6"/>
+    <text x="1011" y="330" transform="rotate(-90 1011 330)" text-anchor="middle">egress-proxy · allowlist</text>
+  </g></a>
+
+  <!-- edges (drawn before boxes) -->
+  <g class="bp-edge">
+    <path d="M180,210 H223" marker-end="url(#bp-arrow)"/>
+    <path class="dash" d="M180,318 H200 V236 H223" marker-end="url(#bp-arrow)"/>
+    <path d="M395,210 H423" marker-end="url(#bp-arrow)"/>
+    <path d="M595,210 H623" marker-end="url(#bp-arrow)"/>
+    <path d="M795,214 H1048" marker-end="url(#bp-arrow)"/>
+    <path d="M510,246 V298" marker-end="url(#bp-arrow)"/>
+    <path d="M597,328 H623" marker-start="url(#bp-arrow)" marker-end="url(#bp-arrow)"/>
+    <path d="M395,328 H410 V236 H423" marker-end="url(#bp-arrow)"/>
+    <path class="dash" d="M310,356 V384 H905 V358" marker-end="url(#bp-arrow)"/>
+    <path class="dash" d="M570,356 V384"/>
+    <path d="M510,356 V408" marker-end="url(#bp-arrow)"/>
+    <path d="M397,438 H423" marker-start="url(#bp-arrow)" marker-end="url(#bp-arrow)"/>
+    <path d="M595,438 H623" marker-end="url(#bp-arrow)"/>
+    <path d="M795,438 H1048" marker-end="url(#bp-arrow)"/>
+    <path d="M510,466 V558" marker-end="url(#bp-arrow)"/>
+    <path class="dash" d="M1120,466 V588 H982" marker-end="url(#bp-arrow)"/>
+    <path class="dash" d="M225,588 H182" marker-end="url(#bp-arrow)"/>
+    <path d="M310,128 V188" marker-end="url(#bp-arrow)"/>
+    <path d="M425,100 H397" marker-end="url(#bp-arrow)"/>
+  </g>
+  <g class="bp-edge-label">
+    <text x="518" y="278">ToolRequest</text>
+    <text x="518" y="398">effectful → ActionIntent</text>
+    <text x="518" y="520">intent + checkpoint, atomic</text>
+    <text x="640" y="378">read tools &amp; context lookups</text>
+    <text x="318" y="153">versions · kill switch</text>
+    <text x="830" y="206">model calls</text>
+    <text x="830" y="430">effects, exactly once</text>
+    <text x="1000" y="606">outcome events</text>
+    <text x="203" y="580" text-anchor="middle">tokens</text>
+  </g>
+
+  <!-- boxes: x, y, w=170, h=56 -->
+  <g class="bp-box ext-actor"><rect x="30" y="190" width="150" height="56" rx="8"/>
+    <text class="n" x="105" y="214" text-anchor="middle">Principal</text>
+    <text class="s" x="105" y="232" text-anchor="middle">user or service trigger</text></g>
+  <a href="#identity-broker"><g class="bp-box"><rect x="30" y="300" width="150" height="56" rx="8"/>
+    <text class="n" x="105" y="324" text-anchor="middle">identity-broker</text>
+    <text class="s" x="105" y="342" text-anchor="middle">per-Run credential</text></g></a>
+  <a href="#pii-vault"><g class="bp-box"><rect x="30" y="560" width="150" height="56" rx="8"/>
+    <text class="n" x="105" y="584" text-anchor="middle">pii-vault</text>
+    <text class="s" x="105" y="602" text-anchor="middle">re-identification, audited</text></g></a>
+
+  <a href="#release-control"><g class="bp-box"><rect x="225" y="72" width="170" height="56" rx="8"/>
+    <text class="n" x="310" y="96" text-anchor="middle">release-control</text>
+    <text class="s" x="310" y="114" text-anchor="middle">pinning · canary · kill switch</text></g></a>
+  <a href="#eval-platform"><g class="bp-box"><rect x="425" y="72" width="170" height="56" rx="8"/>
+    <text class="n" x="510" y="96" text-anchor="middle">eval-platform</text>
+    <text class="s" x="510" y="114" text-anchor="middle">datasets · judges · gates</text></g></a>
+  <a href="#data-governance"><g class="bp-box"><rect x="625" y="72" width="170" height="56" rx="8"/>
+    <text class="n" x="710" y="96" text-anchor="middle">data-governance</text>
+    <text class="s" x="710" y="114" text-anchor="middle">inventory · verified deletion</text></g></a>
+
+  <a href="#scheduler"><g class="bp-box"><rect x="225" y="190" width="170" height="56" rx="8"/>
+    <text class="n" x="310" y="214" text-anchor="middle">scheduler</text>
+    <text class="s" x="310" y="232" text-anchor="middle">durable queue · admission</text></g></a>
+  <a href="#orchestrator"><g class="bp-box core"><rect x="425" y="190" width="170" height="56" rx="8"/>
+    <text class="n" x="510" y="214" text-anchor="middle">orchestrator</text>
+    <text class="s" x="510" y="232" text-anchor="middle">control flow · bounds · loops</text></g></a>
+  <a href="#model-gateway"><g class="bp-box"><rect x="625" y="190" width="170" height="56" rx="8"/>
+    <text class="n" x="710" y="214" text-anchor="middle">model-gateway</text>
+    <text class="s" x="710" y="232" text-anchor="middle">quotas · retries · routing</text></g></a>
+
+  <a href="#context-service"><g class="bp-box"><rect x="225" y="300" width="170" height="56" rx="8"/>
+    <text class="n" x="310" y="324" text-anchor="middle">context-service</text>
+    <text class="s" x="310" y="342" text-anchor="middle">budgeted · labelled · fresh</text></g></a>
+  <a href="#tool-gateway"><g class="bp-box core"><rect x="425" y="300" width="170" height="56" rx="8"/>
+    <text class="n" x="510" y="324" text-anchor="middle">tool-gateway</text>
+    <text class="s" x="510" y="342" text-anchor="middle">enforcement point · limits</text></g></a>
+  <a href="#policy-engine"><g class="bp-box"><rect x="625" y="300" width="170" height="56" rx="8"/>
+    <text class="n" x="710" y="324" text-anchor="middle">policy-engine</text>
+    <text class="s" x="710" y="342" text-anchor="middle">allow · deny · escalate</text></g></a>
+  <g class="bp-box sor"><rect x="830" y="300" width="150" height="56" rx="8"/>
+    <text class="n" x="905" y="324" text-anchor="middle">Systems of record</text>
+    <text class="s" x="905" y="342" text-anchor="middle">row-level security</text></g>
+
+  <a href="#approval-service"><g class="bp-box"><rect x="225" y="410" width="170" height="56" rx="8"/>
+    <text class="n" x="310" y="434" text-anchor="middle">approval-service</text>
+    <text class="s" x="310" y="452" text-anchor="middle">human review queue</text></g></a>
+  <a href="#action-ledger"><g class="bp-box core"><rect x="425" y="410" width="170" height="56" rx="8"/>
+    <text class="n" x="510" y="434" text-anchor="middle">action-ledger</text>
+    <text class="s" x="510" y="452" text-anchor="middle">intents · semantic keys</text></g></a>
+  <a href="#executor"><g class="bp-box"><rect x="625" y="410" width="170" height="56" rx="8"/>
+    <text class="n" x="710" y="434" text-anchor="middle">executor</text>
+    <text class="s" x="710" y="452" text-anchor="middle">exactly once · paced</text></g></a>
+
+  <a href="#telemetry-pipeline"><g class="bp-box"><rect x="225" y="560" width="170" height="56" rx="8"/>
+    <text class="n" x="310" y="584" text-anchor="middle">telemetry-pipeline</text>
+    <text class="s" x="310" y="602" text-anchor="middle">redact in-process · tiered</text></g></a>
+  <a href="#state-store"><g class="bp-box"><rect x="425" y="560" width="170" height="56" rx="8"/>
+    <text class="n" x="510" y="584" text-anchor="middle">state-store</text>
+    <text class="s" x="510" y="602" text-anchor="middle">checkpoints · versions</text></g></a>
+  <a href="#memory-store"><g class="bp-box"><rect x="625" y="560" width="170" height="56" rx="8"/>
+    <text class="n" x="710" y="584" text-anchor="middle">memory-store</text>
+    <text class="s" x="710" y="602" text-anchor="middle">provenance · trust</text></g></a>
+  <a href="#outcome-store"><g class="bp-box"><rect x="830" y="560" width="150" height="56" rx="8"/>
+    <text class="n" x="905" y="584" text-anchor="middle">outcome-store</text>
+    <text class="s" x="905" y="602" text-anchor="middle">cost per outcome · lift</text></g></a>
+
+  <g class="bp-box ext-actor"><rect x="1050" y="190" width="140" height="56" rx="8"/>
+    <text class="n" x="1120" y="214" text-anchor="middle">Model providers</text>
+    <text class="s" x="1120" y="232" text-anchor="middle">tokens per minute</text></g>
+  <g class="bp-box ext-actor"><rect x="1050" y="410" width="140" height="56" rx="8"/>
+    <text class="n" x="1120" y="434" text-anchor="middle">External systems</text>
+    <text class="s" x="1120" y="452" text-anchor="middle">email · payments · APIs</text></g>
+</svg>

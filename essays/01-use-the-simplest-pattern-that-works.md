@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Use the Simplest Pattern That Works"
+redirect_from: /01-use-the-simplest-pattern-that-works.html
 order: 1
 ---
 

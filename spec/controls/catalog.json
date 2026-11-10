@@ -1,0 +1,11 @@
+---
+layout: null
+---
+{% assign domains = site.pages | where: "layout", "controls" | sort: "order" %}
+{
+  "spec": "EAS",
+  "version": {{ site.spec_version | jsonify }},
+  "domains": [{% for p in domains %}{% assign d = site.data.controls[p.domain] %}{% if d %}
+    {{ d | jsonify }}{% unless forloop.last %},{% endunless %}{% endif %}{% endfor %}
+  ]
+}

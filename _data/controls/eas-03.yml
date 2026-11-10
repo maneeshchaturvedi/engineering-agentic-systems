@@ -1,0 +1,313 @@
+domain: EAS-03
+order: 3
+slug: actions
+title: Actions as Data
+essay: 03-actions-are-data-before-they-are-effects
+summary: >-
+  The model produces decisions about effects, not effects. Each side effect is
+  committed as a durable ActionIntent with a semantic idempotency key, and a
+  separate executor turns committed intents into effects exactly once.
+
+controls:
+  - id: EAS-03.01
+    title: Effect classification of every Tool
+    level: L1
+    applies: All Tools exposed to the model.
+    requirement: >-
+      Every Tool MUST be classified by `effect_class`: `none`, `reversible`,
+      `reversible_delayed` or `irreversible`. A Tool whose effect cannot be
+      undone once it happens (an email delivered, a public post, an external
+      money transfer) MUST be classified `irreversible`, or `reversible_delayed`
+      only if a cancellation window is actually implemented.
+    rationale: >-
+      Not every action is equally dangerous, and the architecture should
+      reflect that: reversible actions can be compensated, delayed ones
+      cancelled, and irreversible ones can only be guarded before they happen.
+    evidence:
+      declared: "`tools[].effect_class` is set for every Tool in the manifest."
+      static: >-
+        Classifications match the Tool's implementation: any Tool that sends,
+        publishes or moves money externally is `irreversible` unless it
+        enqueues into a cancellable delay.
+      runtime: Every `execute_tool` span carries `eas.tool.effect_class`, matching the manifest.
+    remediation:
+      scope: local
+      guidance: Add `effect_class` to each Tool in the manifest and emit it as a span attribute from the tool interception point.
+    hooks: [tool.before]
+    components: [tool-gateway]
+    see_also: [EAS-03.08, EAS-07.04]
+    section: reversible-and-irreversible-actions
+
+  - id: EAS-03.02
+    title: Action ledger
+    level: L2
+    applies: All Workflows with Tools whose `effect_class` is not `none`.
+    requirement: >-
+      Every side effect MUST be committed as an ActionIntent to a durable
+      action ledger before it is executed. The ledger MUST record, for each
+      intent, the Run, the Principal it acts for, the action description, its
+      lifecycle state and timestamps, and the external system's result.
+    rationale: >-
+      Once actions are data before they are effects, auditing becomes a query
+      rather than a forensic investigation, and approval, dry runs, policy and
+      pacing all gain a natural home.
+    evidence:
+      static: >-
+        Effectful Tools do not call external systems; they (or a `tool.before`
+        substitution) write an ActionIntent to the ledger and return. The
+        ledger schema includes the fields above.
+      runtime: >-
+        Every `eas.execute` span is linked to an `eas.intent` span with the
+        same `eas.intent.id` that precedes it. No `execute_tool` span with
+        `eas.tool.effect_class` other than `none` performs an effect without a
+        corresponding `eas.intent` span.
+      attested: How would you answer "how many people received the wrong email?" after an incident, and how long would it take?
+    remediation:
+      scope: structural
+      guidance: >-
+        Introduce a ledger table (partitioned by tenant) and convert effectful
+        Tools into proposal Tools that write intents; use `tool.before`
+        substitution where Tools cannot be rewritten.
+    hooks: [tool.before]
+    components: [action-ledger]
+    see_also: [EAS-02.04, EAS-03.05]
+    section: separate-deciding-from-doing
+
+  - id: EAS-03.03
+    title: Semantic idempotency keys
+    level: L2
+    applies: All ActionIntents.
+    requirement: >-
+      Every ActionIntent MUST carry an idempotency key derived from its
+      logical purpose: tenant, Run, action type, target and position in the
+      sequence. The key MUST NOT be derived from model-generated content (body,
+      wording, subject). The ledger MUST reject a second intent with an
+      existing key.
+    rationale: >-
+      A retry that goes back through the model can produce a different draft,
+      recipient or amount. A content-derived key then sees two distinct
+      actions and performs both; a key based on what the action is for does
+      not.
+    evidence:
+      static: >-
+        The key derivation function takes only identity and position fields,
+        never generated text or a hash of it; the ledger has a uniqueness
+        constraint on the key.
+      runtime: >-
+        No two `eas.intent` spans that reached state `executed` share an
+        `eas.intent.key_hash` within a tenant.
+    remediation:
+      scope: local
+      guidance: >-
+        Compute keys from (tenant, run_id, action_type, target, sequence
+        position) and add a unique index on the key in the ledger.
+    components: [action-ledger]
+    see_also: [EAS-09.11]
+    section: the-twist-a-retry-can-produce-a-different-action
+
+  - id: EAS-03.04
+    title: Atomic intent commit with checkpoint
+    level: L2
+    applies: All Workflows with an action ledger and durable state.
+    requirement: >-
+      The write of an ActionIntent to the ledger MUST occur in the same
+      transaction as the Checkpoint that records the Run's progress past the
+      Decision that produced it, so that either both are durable or neither
+      is.
+    rationale: >-
+      Making the decision and the record of the decision atomic means a
+      resumed Run continues after the decision rather than re-making it, and
+      no committed intent exists for a decision the Run has forgotten.
+    evidence:
+      static: >-
+        Ledger and checkpoint writes share one transaction (same database
+        transaction, or a transactional outbox written with the checkpoint).
+        Two independent writes are a finding.
+      attested: What happens if the process crashes between recording the Decision and writing the intent?
+    remediation:
+      scope: structural
+      guidance: >-
+        Store intents alongside checkpoints in the same transactional store, or
+        write them to an outbox table within the checkpoint transaction.
+    hooks: [state.checkpoint]
+    components: [action-ledger, state-store]
+    see_also: [EAS-09.03, EAS-09.05]
+    section: separate-deciding-from-doing
+
+  - id: EAS-03.05
+    title: Separate executor recording external reference
+    level: L2
+    applies: All Workflows with an action ledger.
+    requirement: >-
+      ActionIntents MUST be performed by an executor separate from the
+      reasoning and orchestration layers, which reads committed intents from
+      the ledger, performs them, records the external system's identifier for
+      the result (`external_ref`), and marks the intent complete.
+    rationale: >-
+      A separate, boring, reliable component turning decisions into effects is
+      what lets a nondeterministic one take real actions without the system
+      becoming nondeterministic about what it did.
+    evidence:
+      static: >-
+        The executor is a distinct component (process, worker or activity)
+        that selects intents by state from the ledger; orchestration code does
+        not call effectful clients.
+      runtime: >-
+        Every `eas.execute` span ending with `eas.intent.state = executed` has
+        `eas.intent.external_ref_present = true`.
+    remediation:
+      scope: structural
+      guidance: >-
+        Move effectful client calls into an executor that polls or subscribes
+        to the ledger, and persist the target system's identifier on success.
+    components: [executor, action-ledger]
+    see_also: [EAS-02.05]
+    section: separate-deciding-from-doing
+
+  - id: EAS-03.06
+    title: Exactly-once at the far end
+    level: L2
+    applies: All Tools whose `effect_class` is not `none`.
+    requirement: >-
+      The executor MUST ensure each ActionIntent produces at most one effect
+      by: passing the ledger's key to targets that accept idempotency keys;
+      using upserts keyed on an identifier the system controls; or, for
+      targets offering neither, taking a lease on the intent before acting and
+      reconciling against the target system's records before retrying any
+      intent whose outcome is uncertain. For targets without native
+      idempotency, the remaining uncertainty window and how it is closed MUST
+      be documented.
+    rationale: >-
+      The ledger stops the system intending an action twice, but the executor
+      can crash too. Where the target offers no deduplication, a narrow
+      window remains; pretending it doesn't exist is how duplicates happen.
+    evidence:
+      declared: "`tools[].idempotency` is set (`native_key`, `upsert` or `none`) for every effectful Tool."
+      static: >-
+        For `native_key`, the ledger key is passed on each request. For
+        `upsert`, the write is keyed on a system-controlled identifier. For
+        `none`, a lease on the intent precedes the call, the request is tagged
+        with the intent's identifier, and a reconciliation step queries the
+        target before any retry of an intent in `executing` state.
+      runtime: No two `eas.execute` spans with state `executed` share an `eas.intent.id`.
+      attested: For each effectful Tool with `idempotency = none`, where is the uncertainty window documented and how is it closed?
+    remediation:
+      scope: local
+      guidance: >-
+        Pass keys through where supported; elsewhere add leasing, tag outbound
+        requests with the intent ID, and reconcile from provider events before
+        retry.
+    components: [executor, action-ledger]
+    see_also: [EAS-05.08]
+    section: idempotency-at-the-far-end
+
+  - id: EAS-03.07
+    title: Approval as a ledger state transition
+    level: L2
+    applies: All Tools whose `approval` is `human`.
+    requirement: >-
+      An action requiring human approval MUST be committed to the ledger in
+      state `proposed`, and the executor MUST NOT perform it until it has
+      transitioned to `approved`. Approval MUST NOT be implemented as an
+      in-process wait that holds the Run's worker.
+    rationale: >-
+      With actions as data, approval is just another step in the action's
+      lifecycle; no separate mechanism is bolted on beside the agent, and
+      batching approvals is a query over proposed actions.
+    evidence:
+      declared: "`tools[].approval` is set for every effectful Tool."
+      static: >-
+        The executor selects only intents in `approved` state; the approval
+        interface updates ledger state rather than resuming a blocked call.
+      runtime: >-
+        Every `eas.execute` span for an intent with `eas.intent.approval =
+        human` is preceded by an `eas.intent` span for the same intent in state
+        `approved`.
+    remediation:
+      scope: structural
+      guidance: >-
+        Replace blocking approval prompts with intents committed as `proposed`
+        and an approval service that moves them to `approved` or `rejected`.
+    components: [approval-service, action-ledger, executor]
+    see_also: [EAS-09.02]
+    section: the-things-this-makes-possible
+
+  - id: EAS-03.08
+    title: Irreversible last, behind a gate
+    level: L2
+    applies: Workflows that perform more than one effect, or any `irreversible` effect.
+    requirement: >-
+      In a multi-step Workflow, reversible effects MUST be ordered before
+      irreversible ones, and every irreversible effect MUST be preceded by a
+      gate: a policy check and, for high-stakes cases, human approval.
+      Reversible effects MUST be recorded with a compensating action, and
+      compensations MUST themselves be executed through the ledger. The design
+      MUST NOT claim compensation for an irreversible effect.
+    rationale: >-
+      If anything fails before the gate, everything can be undone; the gate is
+      the last point at which a mistake can be caught. Compensations routed
+      through the ledger mean a crash during rollback resumes the rollback.
+    evidence:
+      declared: "Every Tool with `effect_class = irreversible` has `approval` set to `policy` or `human`."
+      static: >-
+        Workflow ordering places irreversible Tools after reversible ones;
+        reversible intents carry a `compensation`; compensating actions are
+        written as ActionIntents; no compensation is defined for irreversible
+        Tools.
+      runtime: >-
+        Within a Run, no `execute_tool` span with `eas.tool.effect_class =
+        reversible` follows one with `eas.tool.effect_class = irreversible`;
+        every `irreversible` effect is preceded by an `eas.policy` span with
+        decision `allow` or an approved human intent.
+    remediation:
+      scope: structural
+      guidance: >-
+        Reorder the Workflow so irreversible steps come last; add compensations
+        for reversible steps as ledger intents; consider `reversible_delayed`
+        (a cancellation window) where a short delay is acceptable.
+    components: [action-ledger, policy-engine, approval-service, executor]
+    see_also: [EAS-03.01, EAS-03.07, EAS-04.02]
+    section: reversible-and-irreversible-actions
+
+  - id: EAS-03.09
+    title: Effect pacing in the executor
+    level: L2
+    applies: Workflows whose effects are subject to external rate expectations (for example outbound messaging).
+    requirement: >-
+      Rate limits on real-world effects (for example messages per hour per
+      sending account or per tenant) MUST be enforced in the executor,
+      independent of how fast the agent reasons.
+    rationale: >-
+      Pacing sits naturally in the executor, where it governs what actually
+      happens in the world rather than how quickly decisions are made.
+    evidence:
+      static: Rate limiters keyed by account or tenant in the executor, configured per action type.
+      runtime: The count of `eas.execute` spans per account and action type per hour never exceeds the configured rate.
+    remediation:
+      scope: local
+      guidance: Add a keyed rate limiter in the executor that defers intents rather than dropping them.
+    components: [executor]
+    see_also: [EAS-05.07]
+    section: the-things-this-makes-possible
+
+  - id: EAS-03.10
+    title: Dry-run mode
+    level: L3
+    applies: All Workflows with an action ledger.
+    requirement: >-
+      It MUST be possible to run a Workflow with the executor disabled, so
+      that ActionIntents are committed to the ledger and can be inspected but
+      no effects are performed.
+    rationale: >-
+      With actions as data, dry runs become trivial: disable the executor, run
+      the agent, and see exactly what it would have done.
+    evidence:
+      static: A configuration switch disables execution per Workflow, version or Run without code change.
+      runtime: Dry-run Runs produce `eas.intent` spans and no `eas.execute` spans.
+      attested: How is a dry run started, and how are its intents reviewed and discarded?
+    remediation:
+      scope: local
+      guidance: Add a per-Run flag that the executor honours by skipping intents from that Run, and a ledger view for reviewing them.
+    components: [executor, action-ledger]
+    see_also: [EAS-10.09]
+    section: the-things-this-makes-possible

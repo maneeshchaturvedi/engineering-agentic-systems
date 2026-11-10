@@ -6,16 +6,20 @@
   {% seo %}
   <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
 </head>
-<body>
+<body class="{{ layout.body_class | default: page.body_class | default: 'essay' }}">
   <header class="site-header">
     <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
-    <span class="site-author">{{ site.author }}</span>
+    <nav class="site-nav">
+      {% for item in site.data.nav %}
+      <a href="{{ item.url | relative_url }}"{% assign sec = page.section | default: layout.section %}{% if sec == item.title %} aria-current="page"{% endif %}>{{ item.title }}</a>
+      {% endfor %}
+    </nav>
   </header>
   <main>
     {{ content }}
   </main>
   <footer class="site-footer">
-    &copy; {{ 'now' | date: '%Y' }} {{ site.author }}
+    &copy; {{ 'now' | date: '%Y' }} {{ site.author }} · EAS Specification {{ site.spec_version }}
   </footer>
 </body>
 </html>

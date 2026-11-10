@@ -1,0 +1,137 @@
+- id: scheduler
+  plane: Run
+  role: Admits Runs through a durable queue, allocates capacity by priority and tenant, and protects in-flight Runs when shedding load.
+  interfaces:
+    - "submit(workflow, version, principal, priority) → run_id | refused(status)"
+    - "Workers pull runnable Runs according to available capacity."
+  realised_by: Durable queues, workflow engines' task queues, or a platform job service.
+
+- id: orchestrator
+  plane: Run
+  role: Owns control flow — the graph or loop that decides when the model is consulted, enforces step, token, time and cost limits, detects loops, and stops Runs with a distinct status.
+  interfaces:
+    - Exposes every hook in the hook contract.
+    - Never performs business side effects inline.
+  realised_by: The agent framework itself (LangGraph, OpenAI Agents SDK, CrewAI Flows, …) configured per its stack profile.
+
+- id: model-gateway
+  plane: Run
+  role: The single path to model providers. Owns retries (and is the only layer that does), retry budgets, circuit breakers, token-denominated hierarchical quotas, routing and cascades, and cost metering.
+  interfaces:
+    - "OpenAI- or provider-compatible inference API, with tenant, Run and priority headers."
+    - Emits ModelCall spans with usage and cost.
+  realised_by: An LLM gateway or proxy deployed in front of all providers.
+
+- id: context-service
+  plane: Run
+  role: Assembles the smallest sufficient context — stable cacheable prefix, precomputed snapshots, fresh lookups, bounded retrieval — with an `as_of` and trust label on every item.
+  interfaces:
+    - "assemble(run, step, needs) → ContextItem[] with kind, as_of, trust, tokens, truncated"
+  realised_by: Retrieval services, feature or snapshot stores, and parameterised query templates.
+
+- id: tool-gateway
+  plane: Run
+  role: The enforcement point between reasoning and execution. Every ToolRequest passes through it; it validates arguments against the Tool contract, applies per-tool limits, consults the policy engine, converts effectful requests into ActionIntents, enforces output limits with explicit truncation, and marks taint.
+  interfaces:
+    - Binds the `tool.before` and `tool.after` hooks.
+    - Tool registry with contracts (schemas, effect class, trust, scopes, limits) and pinned third-party descriptions.
+  realised_by: A tool proxy or MCP gateway, or a wrapper applied to every tool in-process.
+
+- id: policy-engine
+  plane: Run
+  role: The decision point. Evaluates structured requests and outputs against versioned, tested policy and returns allow, deny or escalate with the rule that decided.
+  interfaces:
+    - "decide(run_context, request) → {decision, rule_id, obligations}"
+  realised_by: A policy engine evaluating policy-as-code, or ordinary tested code.
+
+- id: action-ledger
+  plane: Run
+  role: Durable record of every side effect the system has decided to perform, keyed by a semantic idempotency key and committed atomically with the Run's checkpoint. Approval, dry runs, auditing and pacing are queries and state transitions over it.
+  interfaces:
+    - "commit(intent) → intent_id | duplicate(intent_id)"
+    - "State machine: proposed → approved/rejected → executing → executed/failed → reconciled."
+  realised_by: A transactional outbox table partitioned by tenant.
+
+- id: executor
+  plane: Run
+  role: Performs committed intents against the outside world exactly once — passing keys through, upserting, or leasing and reconciling — records the external reference, paces effects per account, and runs compensations for reversible actions.
+  interfaces:
+    - Reads approved intents from the ledger; never invoked by the model.
+  realised_by: Worker processes or workflow-engine activities.
+
+- id: approval-service
+  plane: Run
+  role: The human review queue. Moves intents from proposed to approved or rejected, supports batch review, and records who approved what.
+  interfaces:
+    - "approve(intent_ids, reviewer) / reject(intent_ids, reviewer, reason)"
+  realised_by: An internal review UI over the ledger.
+
+- id: identity-broker
+  plane: Trust
+  role: Mints a short-lived, per-Run delegated credential (subject = principal, actor = agent) by token exchange, narrows it on every delegation, issues per-Run cloud credentials, and holds workload identity so no static secrets live in the runtime.
+  interfaces:
+    - "mint(principal, workflow) → credential; exchange(credential, child_scopes) → narrower credential"
+  realised_by: An identity provider supporting token exchange, plus cloud session policies.
+
+- id: egress-proxy
+  plane: Trust
+  role: The only route out of the agent runtime. Allowlists model providers and registered tool endpoints; refuses everything else.
+  interfaces:
+    - Network-level; transparent to agent code.
+  realised_by: A forward proxy or service-mesh egress gateway.
+
+- id: pii-vault
+  plane: Trust
+  role: Holds the real values behind redaction tokens, with access control and audited re-identification. Deleting a person's vault entries makes their tokens meaningless everywhere.
+  interfaces:
+    - "tokenise(value, subject) → token; reveal(token, purpose) → value (audited)"
+  realised_by: A tokenisation service or secrets vault.
+
+- id: state-store
+  plane: Data
+  role: Checkpoints at every Step boundary, tagged with the Workflow version; large objects by reference; retention and deletion like any store of personal data.
+  interfaces:
+    - "put(run_id, step, state, version); get(run_id) → latest checkpoint"
+  realised_by: The framework's checkpointer backed by a durable database, or a durable workflow engine's history.
+
+- id: memory-store
+  plane: Data
+  role: Long-term memory with provenance on every entry — writing Run, source, trust — so untrusted-derived memory is downgraded or excluded.
+  interfaces:
+    - Binds the `memory.write` hook.
+  realised_by: A database or vector store with provenance columns, partitioned by tenant.
+
+- id: telemetry-pipeline
+  plane: Data
+  role: Collects traces in the common schema, redacts in-process before export, captures payloads selectively, tiers storage, and derives metrics by Workflow version.
+  interfaces:
+    - "OpenTelemetry with the EAS attributes; redaction processor ahead of every exporter."
+  realised_by: OpenTelemetry SDKs and collectors, an interactive trace store and governed archive storage.
+
+- id: outcome-store
+  plane: Data
+  role: Joins Runs to business OutcomeEvents within attribution windows, computes cost per successful outcome and lift against holdouts.
+  interfaces:
+    - "Consumes run records (`run.end`) and outcome events keyed by entity."
+  realised_by: A warehouse table and scheduled jobs.
+
+- id: eval-platform
+  plane: Control
+  role: Versioned datasets, outcome and trajectory metrics, calibrated judges, minimum detectable effect, and the gates that block regressions.
+  interfaces:
+    - "evaluate(change, suite) → {metrics, significance, verdict}"
+  realised_by: An evaluation harness run in CI, with stored datasets and judge calibration records.
+
+- id: release-control
+  plane: Control
+  role: Pins Runs to versions and drains old ones, runs shadow and canary with automatic rollback, and provides the kill switch per Workflow, version and tenant.
+  interfaces:
+    - "route(run) → version; disable(workflow | version | tenant)"
+  realised_by: Feature flags plus deployment tooling and workflow-engine versioning.
+
+- id: data-governance
+  plane: Control
+  role: Inventory of every store holding agent data, tenant and subject tagging, per-tenant keys, and deletion run as a tracked, verified fan-out job.
+  interfaces:
+    - "delete(subject | tenant) → job with per-store evidence"
+  realised_by: A data catalogue and a deletion orchestrator.

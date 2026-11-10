@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Observability Data Is Sensitive Data"
+redirect_from: /12-observability-data-is-sensitive-data.html
 order: 12
 ---
 

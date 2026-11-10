@@ -1,0 +1,8 @@
+- key: declared
+  label: Declared
+- key: static
+  label: Static
+- key: runtime
+  label: Runtime
+- key: attested
+  label: Attested

@@ -1,0 +1,220 @@
+domain: EAS-02
+order: 2
+slug: separation
+title: Separation of Reasoning and Execution
+essay: 02-separate-reasoning-from-execution
+summary: >-
+  The model never calls the outside world directly. It emits structured
+  ToolRequests; deterministic, testable code in separate layers validates
+  them, decides whether they may proceed, and carries them out.
+
+controls:
+  - id: EAS-02.01
+    title: No direct model-to-effect path
+    level: L1
+    applies: All Workflows that expose Tools to the model.
+    requirement: >-
+      Every ToolRequest MUST pass through a blocking, deterministic
+      interception point before any Tool code with a side effect runs. The
+      framework MUST NOT invoke a Tool function with model-produced arguments
+      without that interception point being able to deny the request. The
+      interception point MUST cover every Tool, including built-in and
+      sub-agent Tools.
+    rationale: >-
+      When the framework invokes functions directly with whatever arguments
+      the model produced, every guarantee the system needs either lives in the
+      model's reasoning or does not exist. The model may request anything; the
+      decision to honour the request belongs to code that does not read
+      instructions from retrieved documents.
+    evidence:
+      static: >-
+        A `tool.before` binding (native or adapter) that can deny a ToolRequest
+        and return a structured refusal, with coverage of every Tool registered
+        with the model, including Tools of sub-agents. Tools passed to the
+        framework as bare functions with no interception are findings.
+      runtime: >-
+        Every `execute_tool` span is preceded, within the same Step, by an
+        `eas.policy` span for the same ToolRequest.
+    remediation:
+      scope: local
+      guidance: >-
+        Wrap every Tool registered with the framework in a shared interceptor
+        that implements `tool.before`, or route all Tools through a tool
+        gateway. Verify coverage by enumerating registered Tools at startup.
+    hooks: [tool.before]
+    components: [tool-gateway, policy-engine]
+    see_also: [EAS-04.02]
+    section: five-layers-with-distinct-responsibilities
+
+  - id: EAS-02.02
+    title: Typed tool contracts
+    level: L1
+    applies: All Tools exposed to the model.
+    requirement: >-
+      Every Tool MUST have an explicit contract consisting of an input schema,
+      an output schema, the permission scopes it requires, and a limit on the
+      size of the output it returns to the model.
+    rationale: >-
+      The tool layer is a set of typed capabilities; its contract is what lets
+      the other layers validate requests, enforce permissions and bound
+      context without trusting the model.
+    evidence:
+      declared: "Every Tool in `tools[]` has `required_scopes` and `output_limit_tokens` set."
+      static: >-
+        Each Tool definition has a machine-readable input schema and a declared
+        output type or schema; tools typed as free-form strings or untyped
+        dictionaries on either side are findings.
+    remediation:
+      scope: local
+      guidance: >-
+        Define input and output models for each Tool, and record scopes and
+        output limits in the manifest next to the Tool's name.
+    components: [tool-gateway]
+    see_also: [EAS-05.06, EAS-03.01]
+    section: five-layers-with-distinct-responsibilities
+
+  - id: EAS-02.03
+    title: Argument validation in tools
+    level: L2
+    applies: All Tools that accept arguments from the model.
+    requirement: >-
+      Tools MUST validate model-supplied arguments against their input schema
+      and business constraints and MUST NOT trust them. Entities whose
+      identity determines what may be accessed or changed (the customer, the
+      account, the order) MUST be resolved from the Run's authenticated
+      context, not from values the model extracted from text.
+    rationale: >-
+      A customer's message can mention an order number that isn't theirs, and
+      a model will happily pass it on. Looking up the order from the
+      authenticated customer's identity removes that failure entirely.
+    evidence:
+      static: >-
+        Tool implementations validate arguments before use, and resolve
+        principal-owned entities through the Run's Credential or session
+        context. Tools that pass a model-supplied identifier straight to a data
+        store or external API are findings.
+      attested: For each Tool that touches customer data, which arguments come from the model and how is each validated?
+    remediation:
+      scope: local
+      guidance: >-
+        Remove principal-identifying parameters from Tool signatures, inject
+        them from the Run context, and add validation of the remaining
+        arguments at the top of each Tool.
+    components: [tool-gateway, identity-broker]
+    see_also: [EAS-06.01, EAS-06.02]
+    section: what-it-looks-like-in-practice
+
+  - id: EAS-02.04
+    title: Consequential values derived, not chosen
+    level: L2
+    applies: All Tools with `effect_class` other than `none`.
+    requirement: >-
+      Values that determine the consequence of a side effect (amounts,
+      recipients, target records) MUST be computed by deterministic code from
+      authoritative records and business rules. The model SHOULD supply only
+      what requires judgement (for example a reason code), as in
+      `propose_refund(reason_code)` rather than `refund(order_id, amount)`.
+    rationale: >-
+      If the model picks the amount or the order, a wrong choice lands
+      directly in the payment system. The model's contribution should be what
+      it is good at: understanding what is being asked and why.
+    evidence:
+      static: >-
+        Signatures of effectful Tools do not accept amounts, recipients or
+        target identifiers as model arguments where these can be derived from
+        records; where they are accepted, code checks them against the
+        authoritative record before use.
+      attested: For each effectful Tool, which consequential values does the model choose, and why can they not be derived?
+    remediation:
+      scope: local
+      guidance: >-
+        Replace direct-effect Tools with proposal Tools that take a reason or
+        intent from the model and compute targets and amounts in code.
+    components: [tool-gateway, action-ledger]
+    see_also: [EAS-02.03, EAS-03.02]
+    section: what-it-looks-like-in-practice
+
+  - id: EAS-02.05
+    title: No inline effects in orchestration control logic
+    level: L2
+    applies: All Workflows that perform side effects.
+    requirement: >-
+      The orchestration layer MUST NOT perform business side effects inline in
+      its control logic (graph nodes, routing functions, workflow code that
+      also decides ordering). Side effects MUST be performed by the execution
+      layer.
+    rationale: >-
+      Effects mixed into control flow make retries and replays dangerous,
+      because re-running the control logic re-runs the effect.
+    evidence:
+      static: >-
+        Orchestration code (nodes, edges, routers, workflow definitions)
+        contains no calls to payment, messaging, record-update or other
+        effectful clients; such calls appear only in executor or Tool code
+        behind the interception point.
+    remediation:
+      scope: structural
+      guidance: >-
+        Move effectful calls out of control logic into Tools or executor
+        activities, and have orchestration emit ActionIntents instead.
+    components: [orchestrator, executor]
+    see_also: [EAS-09.01, EAS-03.05]
+    section: five-layers-with-distinct-responsibilities
+
+  - id: EAS-02.06
+    title: Validated state writes
+    level: L2
+    applies: All Workflows with durable state.
+    requirement: >-
+      Model output MUST NOT mutate durable Run state without schema
+      validation. Every write of model-derived data to state MUST be checked
+      against a schema, and only fields the schema permits MAY be updated.
+    rationale: >-
+      State that the model can overwrite arbitrarily is state an injection can
+      corrupt.
+    evidence:
+      static: >-
+        State has a declared schema; reducers or update functions validate
+        model-derived values before persisting, and the model cannot write
+        arbitrary keys.
+      runtime: Checkpoints that fail validation are rejected, and the rejection is visible in telemetry.
+    remediation:
+      scope: local
+      guidance: >-
+        Define a typed state schema and validate model output in a
+        `state.checkpoint` hook before the Step boundary is persisted.
+    hooks: [state.checkpoint]
+    components: [state-store, orchestrator]
+    see_also: [EAS-09.03]
+    section: five-layers-with-distinct-responsibilities
+
+  - id: EAS-02.07
+    title: Layer-wise testability
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Each layer MUST be tested on its own terms: Tools MUST have unit tests;
+      orchestration MUST be tested by replaying recorded model outputs through
+      it, deterministically and without live ModelCalls; execution MUST be
+      tested for idempotency and policy enforcement with no model involved.
+      Model behaviour SHOULD be tested statistically with an EvalSuite.
+    rationale: >-
+      Separating the layers turns one untestable end-to-end system into four
+      testable ones and one measurable one.
+    evidence:
+      declared: "`evaluation.suite` is set for the Workflow."
+      static: >-
+        The test suite contains: unit tests for each Tool; orchestration tests
+        driven by recorded or stubbed model outputs; executor tests asserting
+        that a repeated ActionIntent produces one effect and that
+        policy-denied intents are not executed. Tests run in CI without model
+        credentials, except the EvalSuite.
+    remediation:
+      scope: local
+      guidance: >-
+        Record model outputs from representative Runs as fixtures, replay them
+        through the orchestration in CI, and add idempotency and policy tests
+        for the executor.
+    components: [eval-platform, executor]
+    see_also: [EAS-09.06, EAS-10.04]
+    section: why-the-boundaries-matter

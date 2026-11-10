@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Enforce Outside the Model"
+redirect_from: /04-enforce-outside-the-model.html
 order: 4
 ---
 

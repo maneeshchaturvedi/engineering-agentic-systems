@@ -1,0 +1,119 @@
+# Example manifest for the refund-capable support agent described in
+# "Separate Reasoning from Execution". It declares the separated design:
+# the model can only propose a refund; amounts and orders come from records.
+eas_version: "0.1"
+
+platform:
+  components:
+    - id: model-gateway
+      implementation: internal-llm-gateway
+      controls: [EAS-05.08, EAS-05.09, EAS-05.11]
+    - id: telemetry-pipeline
+      implementation: otel-collector + redaction processor
+      controls: [EAS-12.02, EAS-12.05]
+
+workflows:
+  - id: support-refunds
+    version: "14"
+    owner: support-platform
+    framework: { name: langgraph, version: "1.x", entrypoint: agents/support/graph.py }
+    rung: agent
+    rung_justification: >-
+      The lookups needed depend on what the customer describes and on what the
+      first lookup returns; the combinations cannot be enumerated as a fixed workflow.
+    risk_tier: T3            # irreversible money movement
+    target_level: L3
+    success_definition: Ticket resolved without escalation and not reopened within 14 days.
+    baseline: Templated macro responses with manual refund handling by support staff.
+    principal: { type: user, scopes: [orders:read, refunds:propose], credential_ttl_s: 900 }
+    budgets:
+      steps: 12
+      tokens: 60000
+      wall_time_s: 120
+      cost_usd: 0.40
+      tool_calls: { default: 4, search_kb: 3 }
+      concurrency: 4
+      retries: { owner_layer: model-gateway, budget_ratio: 0.1 }
+    tools:
+      - name: get_customer_orders          # scoped to the authenticated customer; takes no customer id
+        effect_class: none
+        egress: false
+        output_trust: trusted
+        data_access: private
+        idempotency: not_applicable
+        output_limit_tokens: 1500
+        required_scopes: [orders:read]
+        approval: none
+        source: { type: first_party }
+      - name: search_kb
+        effect_class: none
+        egress: false
+        output_trust: trusted
+        data_access: none
+        idempotency: not_applicable
+        output_limit_tokens: 2000
+        approval: none
+        source: { type: first_party }
+      - name: read_ticket_thread           # customer-authored text
+        effect_class: none
+        egress: false
+        output_trust: untrusted
+        data_access: private
+        idempotency: not_applicable
+        output_limit_tokens: 3000
+        approval: none
+        source: { type: first_party }
+      - name: propose_refund               # writes an ActionIntent; never calls the payment API
+        effect_class: irreversible
+        egress: true
+        moves_money: true
+        output_trust: trusted
+        data_access: private
+        idempotency: native_key
+        output_limit_tokens: 200
+        required_scopes: [refunds:propose]
+        approval: policy                   # human above the automatic threshold
+        source: { type: first_party }
+      - name: reply_to_customer
+        effect_class: irreversible
+        egress: true
+        output_trust: trusted
+        data_access: private
+        idempotency: native_key
+        output_limit_tokens: 200
+        approval: policy
+        source: { type: first_party }
+    policies:
+      - id: refund-auto-threshold
+        description: Refunds above 100 USD require human approval.
+        category: money
+        enforced_at: [prompt, gateway]
+        code_ref: policies/refunds.rego
+        tests_ref: policies/refunds_test.rego
+      - id: reply-recipient
+        description: Replies go only to the verified ticket requester.
+        category: privacy
+        enforced_at: [gateway]
+        code_ref: policies/recipients.rego
+        tests_ref: policies/recipients_test.rego
+      - id: tainted-run-escalation
+        description: After reading the ticket thread, refunds always escalate to a person.
+        category: safety
+        enforced_at: [gateway]
+        code_ref: policies/taint.rego
+        tests_ref: policies/taint_test.rego
+    context:
+      sources:
+        - { name: system-prompt, kind: static, trust: trusted }
+        - { name: order-records, kind: fresh, trust: trusted, freshness_sla_s: 60 }
+        - { name: customer-ltv-snapshot, kind: slow, trust: trusted, freshness_sla_s: 86400 }
+        - { name: ticket-thread, kind: fresh, trust: untrusted, freshness_sla_s: 60 }
+    state: { checkpointer: postgres, durability: sync, version_strategy: pin_and_drain }
+    memory: { enabled: false }
+    observability: { exporter: otlp, redaction: in_process_tokenised, payload_capture: tiered, retention_days: 30 }
+    evaluation:
+      suite: evals/support-refunds
+      dataset_version: "2026-10-28"
+      mde: 0.03
+      gates: [ci, shadow, canary]
+      kill_switch: flags/support-refunds.enabled

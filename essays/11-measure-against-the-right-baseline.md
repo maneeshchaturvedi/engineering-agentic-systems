@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Measure Against the Right Baseline"
+redirect_from: /11-measure-against-the-right-baseline.html
 order: 11
 ---
 

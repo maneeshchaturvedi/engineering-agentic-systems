@@ -1,0 +1,381 @@
+domain: EAS-09
+order: 9
+slug: durable-state
+title: Durable State
+essay: 09-durable-state-replay-without-recomputation
+summary: >-
+  A Run's progress survives anything that can happen to the machines running
+  it: state is checkpointed at every Step boundary, waiting costs nothing,
+  resume never repeats a side effect, Decisions once made are read rather
+  than recomputed, and every Run follows one consistent Workflow version from
+  start to finish.
+
+controls:
+  - id: EAS-09.01
+    title: No effects before a pause point within the same Step
+    level: L1
+    applies: All Workflows with pause points (human approval, interrupts, external events).
+    requirement: >-
+      Code that performs a side effect MUST NOT execute within the same Step
+      before a pause point. Side effects MUST be placed in their own Step (or
+      recorded task) whose completion is persisted in the Checkpoint before
+      the pause, so that resuming never repeats them. The Workflow owner MUST
+      be able to state exactly what re-executes when a paused Run resumes in
+      the framework in use.
+    rationale: >-
+      Many frameworks re-run an interrupted Step from its beginning on resume,
+      not from the line where it paused; in LangGraph, for example, code
+      before `interrupt()` in a node runs a second time, so an email sent
+      there goes twice.
+    evidence:
+      static: >-
+        For every function or node containing a pause primitive, no
+        effectful Tool call, ActionIntent execution or external write occurs
+        on the path before the pause. The stack profile states the
+        framework's resume semantics.
+      runtime: >-
+        Within a Run, no `execute_tool` span with `eas.tool.effect_class` other
+        than `none` is repeated with the same `eas.tool.args_fingerprint`
+        before and after an `eas.wait` span.
+      attested: >-
+        What exactly re-executes when a paused Run resumes, and what is
+        guaranteed to have been persisted before a side effect happens?
+    remediation:
+      scope: local
+      guidance: >-
+        Split each Step that both acts and pauses into two: an effect Step
+        whose completion is checkpointed, then a pause Step; or route the
+        effect through the action ledger with a semantic idempotency key.
+    hooks: [state.checkpoint, state.resume]
+    components: [orchestrator]
+    see_also: [EAS-03.03, EAS-03.07]
+    section: know-what-re-executes-on-resume
+
+  - id: EAS-09.02
+    title: Durable waiting
+    level: L2
+    applies: All Workflows that wait for a person, a timer or an external event.
+    requirement: >-
+      When a Run must wait, it MUST write its Checkpoint, enter status
+      `waiting` and release its worker. Waiting MUST NOT hold a process,
+      thread, coroutine, open connection or in-memory future.
+    rationale: >-
+      Three days of waiting should cost a row in a database. A design that
+      holds a process open to wait for a human loses every waiting Run at the
+      first deploy, restart or node failure.
+    evidence:
+      declared: "`state.checkpointer` names a durable store."
+      static: >-
+        Approval and timer waits are implemented as checkpoint-and-exit with
+        resume triggered by an event or scheduler, not as awaiting a future,
+        polling loop or sleep inside a live worker.
+      runtime: >-
+        Waits appear as `eas.wait` spans; Runs whose `eas.wait` spans span a
+        deploy or worker restart resume and reach a terminal status.
+      attested: If every worker were restarted now, what would happen to Runs currently waiting for approval?
+    remediation:
+      scope: structural
+      guidance: >-
+        Replace in-process waits with a durable pause: checkpoint, mark the
+        Run `waiting`, and resume via a scheduler or event handler that loads
+        the Checkpoint.
+    hooks: [state.checkpoint, state.resume]
+    components: [orchestrator, state-store, scheduler]
+    see_also: [EAS-03.07, EAS-05.03]
+    section: waiting-should-cost-nothing
+
+  - id: EAS-09.03
+    title: Checkpoint at every Step boundary
+    level: L2
+    applies: All Workflows with more than one Step.
+    requirement: >-
+      The state of every Run MUST be written to a durable store at every Step
+      boundary, and each Checkpoint MUST capture everything needed to resume
+      from it. Resume MUST start from the last committed Checkpoint for that
+      Run. When Steps run in parallel and one fails, results of the Steps that
+      succeeded SHOULD be retained so that a retry reruns only the failure.
+    rationale: >-
+      Durability means nothing completed is lost when a worker dies;
+      resumability requires that the Checkpoint holds everything needed to
+      continue.
+    evidence:
+      declared: "`state.checkpointer` names a durable store (not in-memory)."
+      static: >-
+        A durable checkpointer is configured for every Workflow in production
+        code paths; in-memory checkpointers appear only in tests.
+      runtime: Every completed `eas.step` span is followed by a committed Checkpoint before the next `eas.step` begins.
+    remediation:
+      scope: local
+      guidance: >-
+        Configure the framework's durable checkpointer against a production
+        database and remove in-memory checkpointers from deployed
+        configuration.
+    hooks: [state.checkpoint]
+    components: [orchestrator, state-store]
+    section: four-concerns-often-blurred-together
+
+  - id: EAS-09.04
+    title: Synchronous durability for effectful Workflows
+    level: L2
+    applies: Workflows with any Tool whose `effect_class` is not `none`.
+    requirement: >-
+      Where the framework offers a choice of durability mode, Workflows that
+      take actions MUST checkpoint synchronously, so that a Step's Checkpoint
+      is committed before the next Step begins. Asynchronous or end-of-Run
+      checkpointing MUST NOT be used for such Workflows.
+    rationale: >-
+      An asynchronous Checkpoint lost in a crash means the last Step runs
+      again, and if that Step had an effect, the effect happens twice.
+    evidence:
+      declared: "`state.durability` is set to `sync` for the Workflow."
+      static: >-
+        The framework's durability or checkpoint mode is set explicitly to
+        synchronous for effectful Workflows; a framework default counts only
+        if the profile confirms it is synchronous.
+      runtime: For effectful Workflows, no `eas.step` span starts before the previous Step's Checkpoint commit has completed.
+    remediation:
+      scope: local
+      guidance: Set the durability mode explicitly in Workflow configuration and declare it in the manifest.
+    hooks: [state.checkpoint]
+    components: [orchestrator, state-store]
+    see_also: [EAS-03.04]
+    section: know-what-re-executes-on-resume
+
+  - id: EAS-09.05
+    title: Decisions recorded, not recomputed
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Every ModelCall MUST execute in a construct whose result is recorded
+      durably (an activity, task or checkpointed Step) and returned from the
+      record on replay or resume. Recovery MUST read recorded Decisions and
+      MUST NOT re-invoke the model for a Decision already made. Other
+      nondeterministic inputs (external calls, random values, current time)
+      MUST likewise be recorded.
+    rationale: >-
+      Decisions, once made, are facts: the model is asked once, its answer is
+      recorded, and recovery reads the record. Calling a model directly from
+      replayed workflow code would produce different decisions from the
+      original Run.
+    evidence:
+      static: >-
+        In replay-based engines, ModelCalls and other nondeterministic
+        operations occur only inside activities, never in workflow code; in
+        checkpoint-based frameworks, each Decision is part of the checkpointed
+        state before any action based on it.
+      runtime: >-
+        In resumed Runs, no Step that completed before the resume has a
+        ModelCall span after it (excluding explicit forks under EAS-09.06).
+    remediation:
+      scope: local
+      guidance: >-
+        Move ModelCalls into recorded activities or tasks, and persist each
+        Decision in the Checkpoint before acting on it.
+    hooks: [model.after, state.checkpoint]
+    components: [orchestrator, state-store]
+    section: replay-without-recomputation
+
+  - id: EAS-09.06
+    title: Sandboxed replay and forking
+    level: L2
+    applies: Platforms that offer replay, forking or "time travel" from an earlier Checkpoint.
+    requirement: >-
+      In replay or fork mode, every Tool with `effect_class` other than `none`
+      MUST be replaced by a recorded or sandboxed version, and no ActionIntent
+      created in such a Run MUST reach the Executor against real systems.
+      Replay mode MUST be enforced by the platform, not left to the operator.
+    rationale: >-
+      Forking from a past Checkpoint is extremely valuable for debugging and
+      evaluation and dangerous if the branch can reach real systems; debugging
+      an incident must never cause a second one.
+    evidence:
+      static: >-
+        The replay or fork entry point sets a mode that the tool interception
+        point or Executor reads, substituting recorded results or sandbox
+        backends for effectful Tools; real credentials are not issued to
+        forked Runs.
+      runtime: No `eas.execute` span is linked to a Run in replay or fork mode.
+      attested: When an engineer forks a production Run to debug it, what prevents the fork from sending a real message or making a real payment?
+    remediation:
+      scope: structural
+      guidance: >-
+        Make replay mode a property of the Run checked in `tool.before` and in
+        the Executor, and route effectful Tools to recorded responses or
+        sandbox backends in that mode.
+    hooks: [state.resume, tool.before]
+    components: [orchestrator, tool-gateway, executor]
+    see_also: [EAS-03.10]
+    section: replay-without-recomputation
+
+  - id: EAS-09.07
+    title: Drain on deploy
+    level: L2
+    applies: All Workflows in production.
+    requirement: >-
+      On deploy, old workers MUST stop taking new work, finish the Step they
+      are executing within a time limit, write its Checkpoint and exit. Runs
+      MUST NOT be killed mid-Step by a deploy. New workers resume runnable
+      work from Checkpoints.
+    rationale: >-
+      With durable state, deploys become manageable: paused Runs are on no
+      worker and are unaffected, and in-flight Runs reach a Step boundary
+      before their worker exits.
+    evidence:
+      static: >-
+        Workers pull runnable work from a queue; shutdown handling stops
+        pulling, waits for the current Step up to a configured timeout,
+        checkpoints and exits; the deployment's termination grace period
+        exceeds that timeout.
+      runtime: No `eas.step` span is left unterminated or ends in error across a deploy; Runs active at deploy time reach a terminal status.
+      attested: What is the drain timeout, and what happens to a Step still running when it expires?
+    remediation:
+      scope: local
+      guidance: >-
+        Handle the termination signal by stopping intake and finishing the
+        current Step, and set the platform's grace period above the longest
+        expected Step.
+    hooks: [state.checkpoint]
+    components: [scheduler, orchestrator, release-control]
+    see_also: [EAS-05.14]
+    section: deploys-drain-dont-kill
+
+  - id: EAS-09.08
+    title: Version pinning
+    level: L2
+    applies: All Workflows whose Runs can outlive a deploy (waiting or long-running Runs).
+    requirement: >-
+      Each Run MUST record the Workflow version it started on, and every
+      Checkpoint MUST be tagged with that version. The default strategy MUST
+      be pin and drain: a Run resumes only on the version that started it,
+      old versions remain deployed with workers able to run them until their
+      last Run finishes or is cancelled, and new Runs start on the new
+      version. Resuming on a different version is permitted only under
+      EAS-09.09.
+    rationale: >-
+      Resuming on new code can break topology, state schema or, most
+      insidiously, semantics, where nothing fails but the Run follows two
+      designs. Pin and drain is the only approach that guarantees one
+      consistent design from start to finish.
+    evidence:
+      declared: >-
+        `workflows[].version` is set, and `state.version_strategy` includes
+        `pin_and_drain` (or names `compatible_only` / `migrate` with EAS-09.09
+        evidence).
+      static: >-
+        The Run record and each Checkpoint store the Workflow version;
+        resume routes to workers for that version; deployment keeps old
+        versions running while Runs pinned to them exist.
+      runtime: >-
+        All spans of a Run carry the same `eas.workflow.version`, unless a
+        migration under EAS-09.09 is recorded.
+      attested: When a Run on the previous version resumes after a deploy, which code runs it?
+    remediation:
+      scope: structural
+      guidance: >-
+        Record the version at `run.start`, check it at `state.resume`, and use
+        the engine's version-routing support (or versioned worker pools) so
+        old versions keep running until drained.
+    hooks: [run.start, state.resume]
+    components: [orchestrator, scheduler, release-control, state-store]
+    section: versioning-when-code-changes-under-a-paused-run
+
+  - id: EAS-09.09
+    title: Compatible-change enforcement and tested migrations
+    level: L3
+    applies: Workflows that apply changes to in-flight Runs (strategy `compatible_only` or `migrate`).
+    requirement: >-
+      The platform MUST keep an inventory of where every paused Run is
+      waiting, and CI MUST compare each change against it and block deploys
+      that rename or remove any Step, state field or type a paused Run might
+      touch. Changes applied in place MUST be additive. Breaking changes
+      applied to in-flight Runs MUST use explicit migrations that transform
+      the old version's state into the new one on resume, tested against real
+      Checkpoints sampled from production with personal data removed.
+    rationale: >-
+      Additive changes are safe in place; renames and removals strand paused
+      Runs. Migrations deserve the same discipline as event-schema migrations
+      in a streaming system.
+    evidence:
+      declared: "`state.version_strategy` lists `compatible_only` and/or `migrate`."
+      static: >-
+        A paused-Run inventory (Step and version per waiting Run) exists; a CI
+        check diffs Workflow topology and state schema against it; migration
+        code is versioned with tests that load sampled, redacted Checkpoints.
+      runtime: Resumes that change `eas.workflow.version` correspond to a recorded migration.
+      attested: Show the last deploy blocked by the paused-Run check, or the last migration and the Checkpoints it was tested against.
+    remediation:
+      scope: structural
+      guidance: >-
+        Build the paused-Run inventory from the state store, add a CI gate
+        against it, and run migrations in `state.resume` with tests over a
+        redacted Checkpoint sample.
+    hooks: [state.resume]
+    components: [release-control, state-store, data-governance]
+    see_also: [EAS-09.08, EAS-12.11]
+    section: versioning-when-code-changes-under-a-paused-run
+
+  - id: EAS-09.10
+    title: Checkpoint storage engineering
+    level: L3
+    applies: Platforms running Workflows at volume.
+    requirement: >-
+      Checkpoint storage MUST be capacity-planned as a workload. Large objects
+      (documents, large tool results) MUST be stored in object storage and
+      referenced from Checkpoints, not copied into them. The store MUST be
+      sharded by Run. Checkpoints MUST have a retention policy: full while the
+      Run is active and for a debugging window afterwards, then compacted to
+      the final state, then deleted. Checkpoints MUST be included in the
+      personal-data inventory and the deletion path.
+    rationale: >-
+      A Checkpoint can be tens or hundreds of kilobytes per Step, written at
+      every Step of every Run; and it contains everything the agent saw, so
+      it is a copy of personal data.
+    evidence:
+      declared: "`state.checkpointer` names the store; retention periods are documented."
+      static: >-
+        Checkpoint serialisation replaces large payloads with object-storage
+        references; the store is partitioned by Run; retention and compaction
+        jobs exist; deletion fan-out includes the checkpoint store.
+      attested: What is the checkpoint write volume and growth rate, and how long is a completed Run's full state kept?
+    remediation:
+      scope: structural
+      guidance: >-
+        Externalise large objects at the `state.checkpoint` hook, partition the
+        store by Run, and schedule compaction and deletion according to the
+        retention policy.
+    hooks: [state.checkpoint]
+    components: [state-store, data-governance]
+    see_also: [EAS-12.07, EAS-12.09]
+    section: checkpoints-are-a-real-workload
+
+  - id: EAS-09.11
+    title: Fault-injection testing
+    level: L3
+    applies: All Workflows with effectful Tools or pause points.
+    requirement: >-
+      CI MUST kill workers at every Step boundary and at points inside Steps,
+      resume the affected Runs, and assert that no side effect happened more
+      than once and that the final state equals that of an uninterrupted Run.
+      Before each deploy, a sample of real paused Checkpoints MUST be resumed
+      on the candidate version, and the deploy MUST fail if any cannot
+      continue.
+    rationale: >-
+      Confidence that durability, resumption and versioning work comes only
+      from deliberately breaking them.
+    evidence:
+      static: >-
+        A fault-injection test suite that terminates execution at and inside
+        Step boundaries, with assertions on effect counts (for example via
+        idempotency keys or a sandbox recorder) and final-state equality; a
+        pre-deploy job that resumes sampled paused Checkpoints on the
+        candidate version.
+      attested: Show the most recent CI run of the fault-injection suite and the pre-deploy resume check.
+    remediation:
+      scope: local
+      guidance: >-
+        Add a test harness that interrupts Runs at configurable points against
+        sandboxed Tools, and a release gate that resumes a redacted sample of
+        paused Checkpoints on the candidate.
+    components: [release-control, eval-platform]
+    see_also: [EAS-09.01, EAS-09.09]
+    section: testing-for-it

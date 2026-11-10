@@ -1,0 +1,257 @@
+domain: EAS-04
+order: 4
+slug: enforcement
+title: Enforcement Outside the Model
+essay: 04-enforce-outside-the-model
+summary: >-
+  A prompt expresses intent; it is not a control. Every rule that matters is
+  enforced by deterministic, version-controlled, tested policy at points the
+  model's output must pass through, and as close to the protected resource as
+  possible, so that the system is indifferent to whether the model was
+  persuaded.
+
+controls:
+  - id: EAS-04.01
+    title: Prompt rules have code backstops
+    level: L1
+    applies: All Workflows.
+    requirement: >-
+      Every rule concerning privacy, money, legal obligations or safety that is
+      stated to the model (in a system prompt, Tool description, or other
+      instruction placed in context) MUST also be enforced by a deterministic
+      check outside the model — at the policy gate, an output check, the data
+      layer or the network — that blocks or escalates a violating ToolRequest or
+      output regardless of what the model proposed. The rule MAY remain in the
+      prompt; the prompt MUST NOT be its only enforcement point.
+    rationale: >-
+      A rule in a prompt is followed statistically, can be argued with by
+      injected text, and can be weakened by an unrelated prompt edit. At
+      production volume a 99.5% compliance rate is an incident rate, so the rule
+      must also exist somewhere the model cannot argue with.
+    evidence:
+      declared: >-
+        Each such rule appears in `policies[]` with an `enforced_at` that
+        includes at least one of `gateway`, `output`, `data_layer` or `network`.
+        A policy whose `enforced_at` is only `prompt` and whose subject is
+        privacy, money, legal obligation or safety is a finding.
+      static: >-
+        Procedure. (1) Collect every instruction text the model receives:
+        system prompts and templates, Tool descriptions and parameter
+        descriptions, sub-agent instructions, and any policy text injected as
+        context. (2) Extract every prohibition, limit or obligation ("never",
+        "do not", "only", "always", "must", numeric caps, permitted recipients
+        or targets, required disclaimers). (3) Classify each as privacy, money,
+        legal, safety, or other. (4) For each, locate the deterministic code that
+        enforces it — a check in the tool interception point, an outbound
+        content check, a data-layer permission, a network rule — and record the
+        file and rule identifier. (5) Every rule in the privacy, money, legal or
+        safety categories with no matching enforcement is a finding; a match
+        that only logs, or that relies on a model or classifier to decide, does
+        not count. Rules in the "other" category are reported but not findings.
+      runtime: >-
+        For each declared policy, `eas.policy` spans carrying its rule
+        identifier in `eas.policy.rule_id` occur on Runs that invoke the Tools
+        or produce the outputs it governs.
+      attested: >-
+        For a sample of rules stated in the prompt (for example a refund limit
+        or a permitted-recipient rule): if the model ignored this instruction,
+        what code would stop the action, and where is its test?
+    remediation:
+      scope: local
+      guidance: >-
+        For each unmatched rule, add a check over the structured ToolRequest in
+        the `tool.before` hook (argument bounds, permitted targets) or over the
+        outbound content before it is sent, and record it in `policies[]` with
+        its code and test references. Keep the sentence in the prompt.
+    hooks: [tool.before]
+    components: [policy-engine, tool-gateway]
+    see_also: [EAS-04.02, EAS-04.03, EAS-01.03]
+    section: why-prompts-are-not-controls
+
+  - id: EAS-04.02
+    title: Policy gate on every ToolRequest
+    level: L1
+    applies: All Workflows that expose Tools to the model.
+    requirement: >-
+      Every ToolRequest, from every agent and sub-agent in the Run, MUST be
+      evaluated by a deterministic policy gate before any effect. The gate MUST
+      check at least that the Tool is allowed for the Workflow; that the Run's
+      Credential carries the Tool's required scopes; that arguments are within
+      policy bounds (amounts, permitted recipients or targets, territory);
+      whether the Run is tainted and the Tool is restricted after untrusted
+      exposure; and that the action is within the tenant's rate and spend
+      limits. The gate MUST be able to deny and return a structured refusal to
+      the model, and MUST fail closed.
+    rationale: >-
+      The boundary between reasoning and execution is the natural enforcement
+      point. Because a ToolRequest is structured data rather than prose, the
+      checks are ordinary deterministic code, and they are the control that
+      still holds after every other defence has been bypassed.
+    evidence:
+      declared: >-
+        `tools[].required_scopes` and `tools[].approval` are set for every Tool;
+        `policies[]` entries with `enforced_at: gateway` cover argument bounds
+        for consequential Tools.
+      static: >-
+        A blocking `tool.before` hook or tool gateway through which every Tool
+        is invoked, including built-in, hosted and sub-agent Tools; a Tool
+        reachable by a path that bypasses it is a finding. The gate implements
+        each of the five checks above, takes identity and taint from the Run
+        rather than from arguments, and denies on error or timeout.
+      runtime: >-
+        Every `execute_tool` span is preceded, within the same Step, by an
+        `eas.policy` span with `eas.policy.point = gateway` for that
+        ToolRequest; no `execute_tool` span follows an `eas.policy` span whose
+        decision is `deny`.
+    remediation:
+      scope: local
+      guidance: >-
+        Route every Tool through a single wrapper or gateway that evaluates
+        policy before invocation; derive the allowed-tool list, scopes and
+        bounds from the manifest; convert exceptions in the gate to `deny`.
+    hooks: [tool.before]
+    components: [tool-gateway, policy-engine]
+    see_also: [EAS-02.01, EAS-06.03, EAS-07.03, EAS-05.05, EAS-04.05]
+    section: guardrails-as-policy
+
+  - id: EAS-04.03
+    title: Deterministic output checks
+    level: L2
+    applies: Workflows that send, publish or hand over model-drafted content to people or external systems.
+    requirement: >-
+      Before model-drafted content leaves the system, deterministic checks MUST
+      verify every property that can be decided mechanically for that
+      Workflow, including at least: conformance to the expected schema;
+      presence of required disclosures; absence of personal data that should
+      not be present; and, where the content makes factual claims or citations,
+      that each maps to a source in the Run's context. Properties that cannot
+      be checked mechanically (tone, appropriateness) MAY be screened by a
+      classifier or second model, but its result MUST only allow or escalate
+      for review, never serve as the sole guarantee for a property a
+      deterministic check could decide.
+    rationale: >-
+      The same reasoning that applies to ToolRequests applies to outputs: where
+      a check can be made mechanically it should be, and a probabilistic screen
+      is a signal that triggers review, not a guarantee.
+    evidence:
+      declared: "`policies[]` entries with `enforced_at: output` for each required disclosure, PII rule and schema."
+      static: >-
+        An outbound check on every egress path for drafted content (send,
+        publish, post Tools and user-facing responses), implemented in code:
+        schema validation, required-text checks, PII detection with a
+        deterministic block or redaction, and claim-to-source mapping where
+        applicable. Any classifier result is wired only to `allow` or
+        `escalate`.
+      runtime: >-
+        Every `execute_tool` span with `eas.tool.egress = true` that carries
+        drafted content is preceded by an `eas.policy` span with
+        `eas.policy.point = output`.
+    remediation:
+      scope: local
+      guidance: >-
+        Add an output-check stage in front of every send or publish Tool that
+        runs the mechanical checks first and routes uncertain classifier results
+        to review.
+    hooks: [tool.before]
+    components: [policy-engine, approval-service]
+    see_also: [EAS-04.01, EAS-12.02]
+    section: guardrails-as-policy
+
+  - id: EAS-04.04
+    title: Policy as code
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Policies MUST be kept in version control, changed only through review by
+      someone who understands the business rule and its failure modes, and
+      deployed through the same pipeline as other code with the ability to
+      roll back. Each policy MUST have unit tests, runnable without a model,
+      containing cases it must allow and cases it must block, including
+      adversarial cases from red-team exercises and past incidents.
+    rationale: >-
+      Guardrails are critical code and deserve the same discipline. Policy
+      tests guarantee that wrong proposals cannot become wrong actions without
+      an expensive, nondeterministic evaluation.
+    evidence:
+      declared: "`policies[].code_ref` and `policies[].tests_ref` set for every policy."
+      static: >-
+        Policy source lives in the repository (not only in a console or
+        database); required review on the policy paths; tests for each policy
+        with both must-allow and must-block cases, at least some traceable to
+        incidents or red-team findings; tests run in CI without model calls;
+        the policy deploy has a rollback path.
+      attested: Who reviews a change to a policy, and how was the last policy change rolled out and how would it be rolled back?
+    remediation:
+      scope: local
+      guidance: >-
+        Move rules out of prompts, consoles and ad-hoc configuration into a
+        policy module or policy-language bundle in the repository; add a test
+        file per policy with allow and block tables; add each incident's
+        triggering request as a block case.
+    components: [policy-engine, release-control]
+    see_also: [EAS-10.01, EAS-02.07]
+    section: policy-is-code-treat-it-that-way
+
+  - id: EAS-04.05
+    title: Decision logging with rule id
+    level: L2
+    applies: All Workflows.
+    requirement: >-
+      Every PolicyDecision MUST be recorded with its outcome (`allow`, `deny`,
+      `escalate`), the identifier of the rule that produced it, the
+      enforcement point, and the Run and ToolRequest or output it concerns.
+    rationale: >-
+      Controls are auditable when every decision is logged with the rule that
+      produced it; a rejection that is logged lets a person see both the
+      attempt and the reason.
+    evidence:
+      static: The policy gate and output checks emit a structured record for every decision, not only for denials.
+      runtime: >-
+        Every `eas.policy` span carries non-empty `eas.policy.decision`,
+        `eas.policy.rule_id` and `eas.policy.point`.
+    remediation:
+      scope: local
+      guidance: Return a rule identifier from every policy evaluation and emit it on an `eas.policy` span alongside the decision.
+    hooks: [tool.before]
+    components: [policy-engine, telemetry-pipeline]
+    see_also: [EAS-06.10, EAS-07.10]
+    section: guardrails-as-policy
+
+  - id: EAS-04.06
+    title: Lowest-layer enforcement
+    level: L3
+    applies: Workflows with `data_access` of `private` or `regulated`, or with egress-capable Tools.
+    requirement: >-
+      Rules that protect data visibility, tenant isolation and exfiltration
+      MUST be enforced at the lowest layer able to enforce them — the data
+      layer (for example row-level security on the delegated identity), the
+      network (egress control), or cloud identity policy (access scoped to one
+      tenant's resources) — in addition to wherever the application expresses
+      them. An application-layer filter in a Tool MUST NOT be the only
+      enforcement of such a rule.
+    rationale: >-
+      The application layer expresses policy and the data layer enforces it.
+      Enforcement close to the resource turns a forgotten filter or a tricked
+      Tool into a denied query and an alert rather than a breach.
+    evidence:
+      declared: >-
+        `policies[]` entries for data visibility, tenant isolation and egress
+        have `enforced_at` including `data_layer` or `network`.
+      static: >-
+        Data stores apply row- or column-level policy keyed on the Run's
+        delegated identity, or are physically partitioned per tenant; runtime
+        egress is restricted at the network layer; cloud credentials used by the
+        Run are scoped to the tenant's resources.
+      runtime: >-
+        `eas.policy` spans with `eas.policy.point = data_layer` or `network`
+        appear for denied cross-tenant or off-allowlist requests.
+      attested: If a Tool omitted its permission filter, what would the data store return?
+    remediation:
+      scope: structural
+      guidance: >-
+        Pass the delegated identity to data stores and enable their native
+        row-level security or per-tenant partitioning; place the runtime behind
+        an egress proxy; narrow cloud credentials per Run.
+    components: [data-governance, egress-proxy, identity-broker]
+    see_also: [EAS-06.11, EAS-06.12, EAS-07.05]
+    section: enforcement-belongs-as-low-in-the-stack-as-possible

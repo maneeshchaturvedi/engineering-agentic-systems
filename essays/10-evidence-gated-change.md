@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Evidence-Gated Change"
+redirect_from: /10-evidence-gated-change.html
 order: 10
 ---
 

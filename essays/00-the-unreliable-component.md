@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "The Unreliable Component: What Agents Do to Distributed Systems"
+redirect_from: /00-the-unreliable-component.html
 order: 0
 ---
 

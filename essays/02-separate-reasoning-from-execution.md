@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Separate Reasoning from Execution"
+redirect_from: /02-separate-reasoning-from-execution.html
 order: 2
 ---
 
