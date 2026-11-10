@@ -1,0 +1,17 @@
+---
+layout: default
+---
+{% assign articles = site.pages | where: "layout", "post" | sort: "order" %}
+{% for a in articles %}{% if a.url == page.url %}{% assign idx = forloop.index0 %}{% endif %}{% endfor %}
+<p class="kicker">{% if page.order == 0 %}Introduction{% else %}Principle {{ page.order }} of 12{% endif %}</p>
+<article>
+  {{ content }}
+</article>
+<nav class="pager">
+  {% if idx > 0 %}{% assign prev_idx = idx | minus: 1 %}{% assign prev = articles[prev_idx] %}
+  <a class="prev" href="{{ prev.url | relative_url }}"><span>Previous</span>{{ prev.title }}</a>
+  {% else %}<span></span>{% endif %}
+  {% assign next_idx = idx | plus: 1 %}{% if next_idx < articles.size %}{% assign next = articles[next_idx] %}
+  <a class="next" href="{{ next.url | relative_url }}"><span>Next</span>{{ next.title }}</a>
+  {% endif %}
+</nav>

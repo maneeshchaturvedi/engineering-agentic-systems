@@ -1,0 +1,13 @@
+title: Engineering Agentic Systems
+description: Twelve principles for building LLM agents on the foundations of distributed systems engineering.
+author: Maneesh Chaturvedi
+baseurl: /engineering-agentic-systems
+url: https://maneeshchaturvedi.github.io
+markdown: kramdown
+kramdown:
+  input: GFM
+  auto_ids: true
+plugins:
+  - jekyll-seo-tag
+exclude:
+  - README.md

@@ -1,0 +1,46 @@
+:root {
+  --bg: #fdfcfa; --fg: #1f2328; --muted: #5d6470; --accent: #0b5cad;
+  --rule: #e4e2dd; --code-bg: #f1efea;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181c; --fg: #e6e6e3; --muted: #9aa0a8; --accent: #7cb7ff;
+          --rule: #2c2f35; --code-bg: #23262c; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 19px/1.65 Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+}
+.site-header, main, .site-footer { max-width: 42rem; margin: 0 auto; padding: 0 1rem; }
+.site-header {
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: .5rem;
+  padding-top: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--rule);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: .9rem;
+}
+.site-title { font-weight: 600; color: var(--fg); text-decoration: none; }
+.site-author { color: var(--muted); }
+main { padding-top: 2rem; padding-bottom: 3rem; }
+h1, h2, h3 { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.25; }
+h1 { font-size: 2rem; margin: 0 0 1.5rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+a { color: var(--accent); }
+code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; font-size: .85em; }
+.kicker {
+  font-family: system-ui, -apple-system, sans-serif; font-size: .8rem; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 .5rem;
+}
+.toc { padding-left: 1.6rem; }
+.toc li { margin: .5rem 0; }
+.pager {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+  margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  font-family: system-ui, -apple-system, sans-serif; font-size: .95rem;
+}
+.pager a { text-decoration: none; line-height: 1.35; }
+.pager span { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.pager .next { text-align: right; grid-column: 2; }
+.site-footer {
+  padding-top: 1rem; padding-bottom: 2rem; border-top: 1px solid var(--rule);
+  color: var(--muted); font-family: system-ui, sans-serif; font-size: .85rem;
+}
+@media (max-width: 600px) { body { font-size: 17px; } h1 { font-size: 1.6rem; } }
