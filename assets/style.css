@@ -58,11 +58,20 @@ code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; font-
 .site-nav a[aria-current] { font-weight: 600; }
 body.doc .site-header, body.doc main, body.doc .site-footer { max-width: 60rem; }
 body.doc { font-size: 17px; }
-body.doc article { overflow-wrap: anywhere; }
-table { border-collapse: collapse; width: 100%; margin: 1.25rem 0; font-family: system-ui, -apple-system, sans-serif; font-size: .85rem; line-height: 1.45; display: block; overflow-x: auto; }
-th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); }
-thead th { border-bottom: 2px solid var(--rule); }
+body.doc article { overflow-wrap: break-word; }
+table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-family: system-ui, -apple-system, sans-serif; font-size: .86rem; line-height: 1.5; border: 1px solid var(--rule); }
+th, td { text-align: left; vertical-align: top; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); overflow-wrap: break-word; }
+thead th { background: var(--tint); border-bottom: 1px solid var(--rule); font-weight: 600; white-space: nowrap; }
+tbody tr:nth-child(even) { background: color-mix(in srgb, var(--tint) 45%, transparent); }
+tbody tr:last-child td { border-bottom: none; }
+th:first-child, td:first-child { min-width: 7.5rem; }
+td:first-child { font-weight: 500; }
+td code, th code { font-size: .92em; overflow-wrap: anywhere; }
 tfoot th { border-top: 2px solid var(--rule); border-bottom: none; }
+@media (max-width: 700px) {
+  table { display: block; overflow-x: auto; border: none; }
+  th, td { min-width: 8rem; }
+}
 pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; font-size: .8rem; line-height: 1.5; }
 pre code { background: none; padding: 0; font-size: inherit; }
 h3 { font-size: 1.05rem; margin-top: 2rem; }
