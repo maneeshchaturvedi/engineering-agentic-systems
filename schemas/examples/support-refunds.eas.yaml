@@ -25,7 +25,7 @@ workflows:
     target_level: L3
     success_definition: Ticket resolved without escalation and not reopened within 14 days.
     baseline: Templated macro responses with manual refund handling by support staff.
-    principal: { type: user, scopes: [orders:read, refunds:propose], credential_ttl_s: 900 }
+    principal: { type: user, scopes: [orders:read, refunds:propose], credential_ttl_s: 900, execution_credential: per_intent }
     budgets:
       steps: 12
       tokens: 60000

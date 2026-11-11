@@ -28,6 +28,11 @@ LLM-based agents put a nondeterministic, persuadable component at the centre of 
     <strong>Reference architecture</strong>
     <span>The components of a mature agentic platform, and the controls each one satisfies.</span>
   </a>
+  <a class="card" href="{{ '/implementation/' | relative_url }}">
+    <span class="card-kicker">Build</span>
+    <strong>Implementation</strong>
+    <span>Progressive configurations from a single model call to a shared platform, and the open-source tools that fit each stage.</span>
+  </a>
   <a class="card" href="{{ '/assessment/' | relative_url }}">
     <span class="card-kicker">Check</span>
     <strong>Assessment</strong>
@@ -38,5 +43,6 @@ LLM-based agents put a nondeterministic, persuadable component at the centre of 
 ## Start here
 
 - **Building an agent?** Read [The Unreliable Component]({{ '/essays/00-the-unreliable-component.html' | relative_url }}), then write a [manifest]({{ '/spec/manifest.html' | relative_url }}) for your Workflow. Declaring your Tools' effect and trust classes will surface most L1 gaps on its own.
+- **Choosing what to build or adopt?** Find your Workflow's stage in the [progressive configurations]({{ '/implementation/stages.html' | relative_url }}), then see the [technology choices]({{ '/implementation/choices.html' | relative_url }}) for that stage.
 - **Running a platform?** Start with the [reference architecture]({{ '/blueprint/' | relative_url }}) and the [conformance model]({{ '/spec/conformance.html' | relative_url }}), especially inheritance.
 - **Building agent tooling?** The [control catalog]({{ '/spec/controls/catalog.json' | relative_url }}) and the [manifest]({{ '/schemas/eas-manifest.schema.json' | relative_url }}) and [report]({{ '/schemas/eas-report.schema.json' | relative_url }}) schemas are machine-readable.

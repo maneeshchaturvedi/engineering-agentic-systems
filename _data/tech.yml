@@ -23,13 +23,15 @@ groups:
         model: open-core
         fit: >-
           OpenAI-compatible proxy in front of many providers with virtual keys,
-          per key/team/user budgets and rate limits in the open-source edition, and
-          retries and fallbacks in one place.
-        satisfies: [EAS-05.04, EAS-05.08, EAS-05.13]
+          per key/team/user budgets and rate limits in the open-source edition;
+          retries, fallbacks and per-deployment cooldowns in one place; per-request
+          cost in a response header and the spend log; OpenTelemetry export.
+        satisfies: [EAS-05.04, EAS-05.08, EAS-05.09, EAS-05.13]
         caveat: >-
-          Tag, project and per-model budgets, audit logs, most built-in guardrails
-          and SSO beyond five users require the enterprise licence. Check which
-          budget features your design depends on.
+          Tag, project and per-model budgets, spend reports, audit logs, most
+          built-in guardrails and SSO beyond five users require the enterprise
+          licence. Cooldowns act as circuit breakers, but there is no retry budget
+          as a share of traffic. Check which budget features your design depends on.
       - name: agentgateway
         url: https://github.com/agentgateway/agentgateway
         licence: Apache-2.0
@@ -39,14 +41,25 @@ groups:
           token rate limits, budgets in currency or tokens, cost tracking, retries
           and OpenTelemetry — the broadest open-source coverage we confirmed.
         satisfies: [EAS-05.04, EAS-05.08, EAS-05.11]
-        caveat: A vendor also sells an enterprise distribution; confirm features you rely on are in the open-source build.
+        caveat: >-
+          A vendor's enterprise distribution adds MCP tool fingerprinting and
+          versioning, rug-pull policies and automatic token exchange; no official
+          open-source-versus-enterprise matrix is published, so confirm features
+          you rely on are in the open-source build.
       - name: Agent Router (formerly Envoy AI Gateway)
         url: https://github.com/theagentrouter/agent-router
         licence: Apache-2.0
         model: open
-        fit: Envoy-based and Kubernetes-native; the natural choice if Envoy or Envoy Gateway already fronts your services.
-        satisfies: [EAS-05.08]
-        caveat: Renamed in 2026 (repository and docs moved). Budget and token-limit features were not confirmed in our check.
+        fit: >-
+          Envoy-based and Kubernetes-native; the natural choice if Envoy or Envoy
+          Gateway already fronts your services. Token-based rate limits per client,
+          per-model token quotas with per-tenant and shared buckets, and
+          OpenTelemetry tracing with OpenInference attributes.
+        satisfies: [EAS-05.08, EAS-05.11]
+        caveat: >-
+          Renamed in 2026 (repository and docs moved). Budgets are in tokens (CEL
+          can weight token types), not currency; usage is charged after a response
+          completes, so an admitted stream can overshoot.
     build: Mapping each Run's budget onto gateway keys or headers, so the gateway enforces per-Run as well as per-key limits.
 
   - id: tool-mediation
@@ -77,7 +90,10 @@ groups:
           MCP federation with per-tool authorization policies written in CEL, OAuth
           for MCP including token exchange, A2A and OpenTelemetry.
         satisfies: [EAS-02.01, EAS-07.04, EAS-07.06]
-        caveat: Policies decide on the request; taint and intent capture still need Run context from the EAS layer.
+        caveat: >-
+          Policies decide on the request; taint and intent capture still need Run
+          context from the EAS layer. Tool fingerprinting against rug-pulls is
+          only in the vendor's enterprise distribution.
       - name: ContextForge MCP Gateway
         url: https://github.com/IBM/mcp-context-forge
         licence: Apache-2.0
@@ -91,11 +107,14 @@ groups:
         model: open
         fit: Per-profile tool allowlists and built-in OAuth flows for teams already standardised on Docker.
         satisfies: [EAS-07.04]
-        caveat: Oriented to Docker Desktop; OpenTelemetry support was not documented.
+        caveat: Oriented to Docker Desktop; OpenTelemetry support was not documented, and its security model lists tool-description poisoning as out of scope.
     build: >-
       Pinning tool descriptions — record a hash per tool at approval and refuse a
-      server whose descriptions change until re-reviewed (EAS-07.06). None of the
-      gateways we checked documents this.
+      server whose descriptions change until re-reviewed (EAS-07.06). No
+      open-source gateway we checked does this: ContextForge's `tools_post_list`
+      hook is still planned, Docker's treats description poisoning as out of
+      scope, and agentgateway offers tool fingerprinting only in its vendor's
+      enterprise distribution.
 
   - id: policy
     title: Policy decisions
@@ -114,14 +133,15 @@ groups:
         fit: >-
           General-purpose decisions over structured input such as
           `{tool, args, principal, tenant, tainted}`; one language for runtime
-          decisions and for CI checks on manifests (via conftest), with decision logs.
+          decisions and for CI checks on manifests (via conftest), with decision
+          logs carrying decision ID, input, result and bundle revision, and masking.
         satisfies: [EAS-04.02, EAS-04.04, EAS-04.05, EAS-07.03]
         caveat: Rego has a learning curve; keep the EAS rule library small and well tested.
       - name: Cedar
         url: https://github.com/cedar-policy/cedar
         licence: Apache-2.0
         model: open
-        fit: Authorization language designed for analysis; a good fit when policies are mostly principal/action/resource permissions.
+        fit: Authorization language designed for analysis, with a CLI that validates policies against a schema and runs test cases; a good fit when policies are mostly principal/action/resource permissions.
         satisfies: [EAS-04.02, EAS-04.04]
         caveat: Embedded library — you supply the server and the decision log.
       - name: Cerbos
@@ -167,17 +187,23 @@ groups:
         fit: >-
           Mature durable execution: non-deterministic calls run as activities whose
           results are recorded, timers and signals wait without holding a worker,
-          and runs can be routed to the code version that started them. Documented
-          integrations exist for the OpenAI Agents SDK and Pydantic AI.
+          and Worker Versioning (GA) keeps a Pinned workflow on the Worker
+          Deployment Version it started on. A Workflow ID conflict policy rejects or
+          reuses duplicate starts. Documented integrations exist for the OpenAI
+          Agents SDK and Pydantic AI.
         satisfies: [EAS-05.12, EAS-09.02, EAS-09.05, EAS-09.07, EAS-09.08]
-        caveat: A cluster to operate (or a managed service); workflow code must follow its determinism rules.
+        caveat: A cluster to operate (or a managed service); workflow code must follow its determinism rules. Pinning needs Worker Versioning enabled (server 1.29.1 or later) and old versions kept running until their workflows drain.
       - name: DBOS Transact
         url: https://github.com/dbos-inc/dbos-transact-py
         licence: MIT
         model: open
         fit: Durable workflows as a library on Postgres — no separate cluster. Has a documented Pydantic AI integration.
-        satisfies: [EAS-09.02, EAS-09.03, EAS-09.05]
-        caveat: Postgres becomes the durability bottleneck; check version-pinning support against your deploy model.
+        satisfies: [EAS-09.02, EAS-09.03, EAS-09.05, EAS-09.08]
+        caveat: >-
+          Postgres becomes the durability bottleneck. Workflows are tagged with the
+          application version they started on (a source hash by default) and are
+          recovered only by processes on that version, so old versions must keep
+          running; moving workflows to a newer version is an enterprise feature.
       - name: Hatchet
         url: https://github.com/hatchet-dev/hatchet
         licence: MIT
@@ -251,7 +277,7 @@ groups:
           Standard OAuth 2.0 Token Exchange (RFC 8693) is supported and enabled by
           default between clients of the same deployment, and the audience can be
           narrowed on exchange.
-        satisfies: [EAS-06.03, EAS-06.05]
+        satisfies: [EAS-06.03, EAS-06.05, EAS-06.13]
         caveat: >-
           Delegation with an actor claim (`act`) is still a preview feature, and
           the scope parameter can widen a token unless a downscoping executor is
@@ -269,7 +295,7 @@ groups:
         model: open
         fit: Kubernetes network policies with domain-based egress rules, so the runtime can reach only model providers and registered tool endpoints.
         satisfies: [EAS-07.05]
-        caveat: Domain rules depend on DNS interception; L7 rules add an Envoy hop.
+        caveat: Domain rules (`toFQDNs`) need Cilium's DNS proxy and a rule allowing DNS, and depend on the agent pod being up; L7 rules add a node-local Envoy hop.
       - name: Istio egress gateway / Squid
         url: https://github.com/istio/istio
         licence: Apache-2.0 (Istio), GPL-2.0 (Squid)
@@ -280,7 +306,7 @@ groups:
     build: >-
       Re-minting a narrow credential for the executor at execution time, so a
       Run that waited days for approval does not depend on a long-lived token
-      (an event-storm hotspot not yet in the spec).
+      (EAS-06.13).
 
   - id: context
     title: Context and memory
@@ -309,7 +335,7 @@ groups:
         url: https://github.com/qdrant/qdrant
         licence: PostgreSQL (pgvector), Apache-2.0 (Qdrant)
         model: open
-        fit: Retrieval for unstructured knowledge, with a collection, schema or namespace per tenant.
+        fit: Retrieval for unstructured knowledge, with a collection, schema or namespace per tenant. Open-source Qdrant supports JWT keys scoped to collections, read-only or read-write.
         satisfies: [EAS-06.07]
         caveat: Shared collections with payload filters leak data when a filter is forgotten; prefer physical partitioning.
       - name: mem0
@@ -318,7 +344,7 @@ groups:
         model: open-core
         fit: A memory layer for agents if you want one off the shelf.
         satisfies: []
-        caveat: Provenance and trust metadata were not confirmed; model-driven updates can overwrite facts. Add your own provenance fields.
+        caveat: Keeps a change history per memory (old and new value, actor), but has no source or trust fields; model-driven updates can overwrite facts. Add your own provenance fields.
     build: The `as_of` and trust labels on every context item, and memory provenance.
 
   - id: observability
@@ -354,7 +380,7 @@ groups:
         model: source-available
         fit: Trace exploration and evaluation for teams using OpenInference.
         satisfies: [EAS-12.01]
-        caveat: Not an OSI licence; cannot be offered as a managed service.
+        caveat: Not an OSI licence; cannot be offered as a managed service. Access control is three instance-wide roles (admin, member, viewer), not per project.
       - name: ClickHouse
         url: https://github.com/ClickHouse/ClickHouse
         licence: Apache-2.0
@@ -366,9 +392,17 @@ groups:
         url: https://github.com/data-privacy-stack/presidio
         licence: MIT (Presidio), MPL-2.0 (OpenBao)
         model: open
-        fit: Presidio detects and anonymises personal data in text; OpenBao's encryption-as-a-service holds per-tenant keys, so a tenant can be removed by destroying its key.
+        fit: >-
+          Presidio detects and anonymises personal data in text, and its encrypt
+          operator is reversible with the decrypt deanonymizer. OpenBao's transit
+          engine holds a named key per tenant; deleting a key (allowed only once
+          the key is configured as deletable) makes its ciphertext undecryptable.
         satisfies: [EAS-12.02, EAS-12.05, EAS-12.10]
-        caveat: HashiCorp Vault is BUSL-licensed and its tokenisation (Transform) engine is enterprise-only; OpenBao has no confirmed equivalent, so the token vault is a small build.
+        caveat: >-
+          HashiCorp Vault is BUSL-licensed and its tokenisation (Transform) engine
+          is enterprise-only; OpenBao has no equivalent engine, so the token vault
+          is a small build. Keep tenant keys non-exportable, or deletion does not
+          prove the data is unreadable.
     build: Emitting the `eas.*` attributes, replacing framework default exporters, and the token vault.
 
   - id: evidence
@@ -385,9 +419,14 @@ groups:
         url: https://github.com/UKGovernmentBEIS/inspect_ai
         licence: MIT (promptfoo, Inspect), Apache-2.0 (DeepEval)
         model: open
-        fit: Evaluation harnesses runnable in CI, with model-graded and deterministic checks. Inspect is strong for agent trajectories; promptfoo for prompt-level suites and red teaming.
+        fit: >-
+          Evaluation harnesses runnable in CI, with model-graded and deterministic
+          checks. promptfoo has trajectory assertions (tools used, arguments,
+          sequence, step count) and a GitHub Action that compares prompts on pull
+          requests; DeepEval has a tool-correctness metric; Inspect scorers receive
+          the full task state.
         satisfies: [EAS-10.03, EAS-10.04, EAS-10.07]
-        caveat: None computes a minimum detectable effect or paired significance for you. DeepEval sends telemetry by default.
+        caveat: None computes a minimum detectable effect or paired significance for you, and none versions datasets — keep them in your repository. DeepEval sends telemetry by default (opt out with DEEPEVAL_TELEMETRY_OPT_OUT).
       - name: garak / PyRIT
         url: https://github.com/NVIDIA/garak
         licence: Apache-2.0 (garak), MIT (PyRIT)
@@ -406,7 +445,10 @@ groups:
         url: https://github.com/argoproj/argo-rollouts
         licence: Apache-2.0
         model: open
-        fit: Progressive delivery on Kubernetes — canary releases with metric analysis and rollback.
+        fit: >-
+          Progressive delivery on Kubernetes — a failed metric analysis aborts the
+          canary and returns traffic to the stable version. Traffic mirroring for
+          shadow tests: Argo Rollouts on Istio, Flagger on Istio and Gateway API.
         satisfies: [EAS-10.09]
         caveat: They roll back deployments, not in-flight Runs; pair with version pinning.
     build: The statistics on the gate — minimum detectable effect and paired McNemar tests — a few dozen lines on scipy or statsmodels.
@@ -433,7 +475,7 @@ groups:
         model: open-core
         fit: Warehouse-native experiments for holdouts and lift.
         satisfies: [EAS-11.06]
-        caveat: Several advanced statistics features live in licensed directories; confirm holdouts are in the edition you run.
+        caveat: The Holdouts feature requires an Enterprise plan; in the MIT core, measure lift as an ordinary experiment with a baseline arm.
       - name: OpenMetadata / DataHub
         url: https://github.com/open-metadata/OpenMetadata
         licence: Apache-2.0

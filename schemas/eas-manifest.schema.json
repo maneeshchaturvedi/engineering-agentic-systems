@@ -220,6 +220,13 @@
             "credential_ttl_s": {
               "type": "integer",
               "minimum": 1
+            },
+            "execution_credential": {
+              "enum": [
+                "per_intent",
+                "run_credential"
+              ],
+              "description": "How deferred effects are authorised: a credential minted per ActionIntent at execution time (EAS-06.13), or the Run's own credential."
             }
           }
         },

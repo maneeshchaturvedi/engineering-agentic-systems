@@ -103,6 +103,9 @@ eas.execute                     (Executor performing an ActionIntent; linked to 
 | `eas.intent.state` | enum | Lifecycle state at the time of the span. |
 | `eas.intent.approval` | `none` \| `policy` \| `human` | |
 | `eas.intent.external_ref_present` | boolean | Executor recorded the target system's identifier. |
+| `eas.credential.minted_for` | `run` \| `intent` | On `eas.execute`: whether the effect used the Run's credential or one minted for this intent ([EAS-06.13](controls/identity.html#eas-06-13)). |
+| `eas.credential.age_s` | number | On `eas.execute`: age of the credential at the moment of execution. |
+| `eas.credential.id_hash` | string | Hash of the credential identifier, so reuse of a Run's credential is detectable without exposing it. |
 
 ### Payload and redaction
 

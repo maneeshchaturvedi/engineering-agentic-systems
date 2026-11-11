@@ -50,7 +50,7 @@ The events cluster into contexts that match the blueprint's components, which is
 | **H2** | Where the ledger lives: deduplication, approval and audit pull in different directions. | A relational table as the record, executed through recorded steps ([effects](choices.html#effects)). |
 | **H3** | Taint and Run context crossing sub-agents and handoffs. | Part of the thin layer: no framework propagates them natively. |
 | **H4** | Provider-hosted tools run inside the model call and bypass the tool gateway. | Treat as ungated; do not use them for Workflows at tier T2 or above unless an equivalent gated tool exists. |
-| **H5** | A short-lived credential minted at the start of a Run expires long before a reviewer approves an intent days later. | The executor obtains its own narrow credential at execution time. Not yet a control in the specification. |
+| **H5** | A short-lived credential minted at the start of a Run expires long before a reviewer approves an intent days later. | The executor obtains its own narrow credential at execution time — now control [EAS-06.13]({{ '/spec/controls/identity.html#eas-06-13' | relative_url }}). |
 | **H6** | Frameworks that apply the latest code to paused Runs. | Record the version on the Run; route resumption to matching workers. |
 | **H7** | Framework default trace exporters that send payloads before your redaction runs. | Replace the default exporters, redact in-process. |
 | **H8** | Reconciling uncertain effects needs each target system's delivery or status API. | Per-integration work in the executor. |

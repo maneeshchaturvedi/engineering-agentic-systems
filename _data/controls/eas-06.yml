@@ -368,3 +368,52 @@ controls:
     components: [data-governance, identity-broker]
     see_also: [EAS-04.06, EAS-06.07]
     section: enforcement-belongs-in-the-data-layer
+
+  - id: EAS-06.13
+    title: Execution-time credentials for deferred effects
+    level: L2
+    applies: >-
+      Workflows in which an ActionIntent can be executed after a durable wait
+      (human approval, a timer, an external event) or by an executor running
+      apart from the Run.
+    requirement: >-
+      The executor MUST perform each deferred effect with a credential obtained
+      at execution time: minted by token exchange from a stored delegation
+      grant, narrowed to that ActionIntent's action and target, and short-lived.
+      The Run's original credential MUST NOT be extended, refreshed or stored to
+      bridge the wait. Before executing, the executor MUST confirm that the
+      Principal still holds the authority the intent requires; if the grant has
+      expired or been revoked, or the authority withdrawn, the intent MUST fail
+      closed and return to review rather than execute.
+    rationale: >-
+      A Run's credential is deliberately short-lived, but approval as a state
+      transition means an effect may execute days later. Keeping the original
+      credential alive to cover that gap creates exactly the long-lived,
+      broadly scoped secret the delegation model exists to avoid, and executes
+      on authority that may since have been revoked.
+    evidence:
+      declared: "`principal.execution_credential` is `per_intent`."
+      static: >-
+        The executor obtains a credential through the identity broker
+        immediately before each effect, with scope derived from the intent's
+        action type and target; no code path persists or refreshes the Run's
+        credential for later use; the executor handles a refused exchange by
+        failing the intent closed.
+      runtime: >-
+        Every `eas.execute` span carries `eas.credential.minted_for = intent` and
+        an `eas.credential.age_s` below the configured lifetime; no `eas.execute`
+        span reuses the credential identifier of the originating Run.
+      attested: >-
+        If a user's access is revoked while one of their intents awaits
+        approval, what happens when a reviewer approves it?
+    remediation:
+      scope: structural
+      guidance: >-
+        Store a narrow delegation grant with each intent at commit time (not a
+        token); have the executor exchange it for an intent-scoped credential at
+        execution, and treat a refused exchange as a rejection that returns the
+        intent to review.
+    hooks: [state.resume]
+    components: [identity-broker, executor, action-ledger]
+    see_also: [EAS-06.03, EAS-06.09, EAS-03.07, EAS-09.02]
+    section: the-agent-acts-on-behalf-of-someone

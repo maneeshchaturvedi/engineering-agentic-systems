@@ -159,7 +159,7 @@ stages:
       - An action ledger, executor and approval queue — effects become committed intents executed exactly once.
       - Run taint after untrusted reads, and an egress proxy so the runtime can only reach approved destinations.
       - Per-Run delegated credentials from an identity broker; synchronous checkpoints; an evaluation gate with a stated minimum detectable effect.
-    controls: [EAS-03.02, EAS-03.03, EAS-03.06, EAS-03.07, EAS-04.01, EAS-04.02, EAS-06.03, EAS-07.02, EAS-07.03, EAS-07.05, EAS-09.04, EAS-10.05, EAS-10.07]
+    controls: [EAS-03.02, EAS-03.03, EAS-03.06, EAS-03.07, EAS-04.01, EAS-04.02, EAS-06.03, EAS-06.13, EAS-07.02, EAS-07.03, EAS-07.05, EAS-09.04, EAS-10.05, EAS-10.07]
     next: >-
       Split into several agents only for a concrete reason: context isolation,
       permission separation, genuine parallelism or independent ownership.
