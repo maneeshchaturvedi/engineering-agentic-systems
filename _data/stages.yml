@@ -1,0 +1,331 @@
+# Progressive reference configurations. Diagrams are generated from this file by
+# scripts/stage_diagrams.py into _includes/stages/; prose renders from it directly.
+# Slots fix every component's grid position so diagrams read as one system growing.
+slots:
+  principal:          { c: 0, r: 0 }
+  identity-broker:    { c: 0, r: 1 }
+  reviewer:           { c: 0, r: 2 }
+  pii-vault:          { c: 0, r: 3 }
+  scheduler:          { c: 1, r: 0 }
+  context-service:    { c: 1, r: 1 }
+  approval-service:   { c: 1, r: 2 }
+  telemetry-pipeline: { c: 1, r: 3 }
+  release-control:    { c: 1, r: 4 }
+  orchestrator:       { c: 2, r: 0 }
+  tool-gateway:       { c: 2, r: 1 }
+  action-ledger:      { c: 2, r: 2 }
+  state-store:        { c: 2, r: 3 }
+  eval-platform:      { c: 2, r: 4 }
+  model-gateway:      { c: 3, r: 0 }
+  policy-engine:      { c: 3, r: 1 }
+  executor:           { c: 3, r: 2 }
+  memory-store:       { c: 3, r: 3 }
+  data-governance:    { c: 3, r: 4 }
+  sub-agent:          { c: 4, r: 0 }
+  systems-of-record:  { c: 4, r: 1 }
+  outcome-store:      { c: 4, r: 3 }
+  egress-proxy:       { c: 5, r: 0, span: 3 }
+  model-provider:     { c: 6, r: 0 }
+  mcp-servers:        { c: 6, r: 1 }
+  external-systems:   { c: 6, r: 2 }
+
+stages:
+  - n: 1
+    slug: single-call
+    title: A single model call
+    rung: single_call
+    tier: T1
+    level: L1
+    when: >-
+      One transformation of unstructured input into structured output —
+      classify, extract, summarise — with no loop and no tools. The workhorse of
+      practical LLM engineering, and where most problems should start.
+    adds:
+      - Deterministic application code that owns control flow and validates the model's output against a schema.
+      - A model client with explicit timeouts and a single retry layer.
+      - Tracing with in-process redaction, a labelled evaluation set run in CI, and a kill switch.
+    controls: [EAS-01.01, EAS-01.03, EAS-05.03, EAS-05.08, EAS-10.01, EAS-10.02, EAS-12.01, EAS-12.02]
+    next: >-
+      Climb only when one call cannot do the job: the work needs several steps
+      in a known order, or a step needs data the input does not carry.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: orchestrator, kind: new, label: application, sub: code · schema check }
+      - { slot: model-gateway, kind: new, label: model client, sub: timeout · one retry layer }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: telemetry-pipeline, kind: new, label: telemetry, sub: OTel · redact first }
+      - { slot: release-control, kind: new, label: kill switch, sub: feature flag }
+      - { slot: eval-platform, kind: new, label: eval suite, sub: labelled set in CI }
+    edges:
+      - { from: principal, to: orchestrator }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider, label: one call }
+      - { from: eval-platform, to: release-control, style: dash }
+
+  - n: 2
+    slug: fixed-workflow
+    title: A fixed workflow with model steps
+    rung: fixed_workflow
+    tier: T1–T2
+    level: L1–L2
+    when: >-
+      The sequence of steps is known in advance but some need language
+      understanding: classify, route to a handler, draft, validate. The control
+      flow belongs to you; the model is called at fixed points.
+    adds:
+      - Workflow code with deterministic routing; rules that must be exactly right stay in code.
+      - Context lookups through parameterised templates and precomputed snapshots, not ad hoc queries.
+      - Effects performed by code, never chosen by the model, with idempotency keys derived from purpose.
+      - Durable state, once any step waits on a person, a timer or an external event.
+    controls: [EAS-01.03, EAS-03.03, EAS-08.02, EAS-08.03, EAS-08.05, EAS-09.02, EAS-09.03]
+    next: >-
+      Climb only when the path genuinely depends on discovery — the number and
+      order of lookups depends on what the previous one returned.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: orchestrator, kind: upgraded, label: workflow code, sub: fixed steps · routing }
+      - { slot: model-gateway, kind: existing, label: model client, sub: timeout · one retry layer }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: context-service, kind: new, label: context lookups, sub: templates · snapshots }
+      - { slot: systems-of-record, kind: ext, label: Systems of record, sub: databases · APIs }
+      - { slot: executor, kind: new, label: effects in code, sub: idempotency keys }
+      - { slot: external-systems, kind: ext, label: External systems, sub: email · payments · APIs }
+      - { slot: state-store, kind: new, label: state store, sub: checkpoints if it waits }
+      - { slot: telemetry-pipeline, kind: existing, label: telemetry, sub: OTel · redact first }
+      - { slot: release-control, kind: existing, label: kill switch, sub: feature flag }
+      - { slot: eval-platform, kind: existing, label: eval suite, sub: labelled set in CI }
+    edges:
+      - { from: principal, to: orchestrator }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider }
+      - { from: context-service, to: orchestrator, from_dx: 0, to_dx: -30 }
+      - { from: context-service, to: systems-of-record, style: dash, label: reads }
+      - { from: orchestrator, to: executor, from_dx: 30, label: decided by code }
+      - { from: executor, to: external-systems, label: effects }
+      - { from: orchestrator, to: state-store, style: dash, from_dx: -30, to_dx: -30 }
+      - { from: eval-platform, to: release-control, style: dash }
+
+  - n: 3
+    slug: read-only-agent
+    title: An agent with read-only tools
+    rung: agent
+    tier: T1
+    level: L1
+    when: >-
+      Investigation and research: the model chooses tools in a loop because the
+      next step depends on what the last one found. Its tools only read, and a
+      person reviews what it produces.
+    adds:
+      - An agent loop with hard limits on steps, tokens, wall time and per-tool calls, and loop detection.
+      - A tool interception hook — in-process at first — enforcing tool contracts and output size limits with explicit truncation.
+      - Identity taken from the Run's context, never from tool arguments.
+    controls: [EAS-01.02, EAS-02.01, EAS-02.02, EAS-05.01, EAS-05.02, EAS-05.05, EAS-05.06, EAS-05.10, EAS-06.01, EAS-06.02, EAS-08.01]
+    next: >-
+      The moment a tool can change something, send something or read content
+      someone outside wrote, the Workflow becomes T2 and the next stage applies.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: orchestrator, kind: upgraded, label: agent loop, sub: limits · loop detection }
+      - { slot: model-gateway, kind: existing, label: model client, sub: timeout · one retry layer }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: context-service, kind: existing, label: context lookups, sub: templates · snapshots }
+      - { slot: tool-gateway, kind: new, label: tool hook, sub: contracts · output caps }
+      - { slot: systems-of-record, kind: ext, label: Systems of record, sub: read-only tools }
+      - { slot: state-store, kind: existing, label: state store, sub: checkpoints }
+      - { slot: telemetry-pipeline, kind: existing, label: telemetry, sub: OTel · redact first }
+      - { slot: release-control, kind: existing, label: kill switch, sub: feature flag }
+      - { slot: eval-platform, kind: upgraded, label: eval suite, sub: outcome + trajectory }
+    edges:
+      - { from: principal, to: orchestrator }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider }
+      - { from: context-service, to: orchestrator, to_dx: -30 }
+      - { from: orchestrator, to: tool-gateway, from_dx: 15, to_dx: 15, label: ToolRequest }
+      - { from: tool-gateway, to: systems-of-record, label: reads }
+      - { from: eval-platform, to: release-control, style: dash }
+
+  - n: 4
+    slug: acting-agent
+    title: An agent that acts
+    rung: agent
+    tier: T2
+    level: L2
+    when: >-
+      The agent sends messages, changes records or reads content it cannot
+      trust — often all three. Its decisions now have consequences, so the
+      deterministic machinery around the model becomes mandatory.
+    adds:
+      - A policy engine behind the tool gateway; every ToolRequest gets allow, deny or escalate from versioned, tested policy.
+      - An action ledger, executor and approval queue — effects become committed intents executed exactly once.
+      - Run taint after untrusted reads, and an egress proxy so the runtime can only reach approved destinations.
+      - Per-Run delegated credentials from an identity broker; synchronous checkpoints; an evaluation gate with a stated minimum detectable effect.
+    controls: [EAS-03.02, EAS-03.03, EAS-03.06, EAS-03.07, EAS-04.01, EAS-04.02, EAS-06.03, EAS-07.02, EAS-07.03, EAS-07.05, EAS-09.04, EAS-10.05, EAS-10.07]
+    next: >-
+      Split into several agents only for a concrete reason: context isolation,
+      permission separation, genuine parallelism or independent ownership.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: identity-broker, kind: new, label: identity broker, sub: per-Run credential }
+      - { slot: reviewer, kind: ext, label: Reviewer, sub: approves intents }
+      - { slot: orchestrator, kind: existing, label: agent loop, sub: limits · loop detection }
+      - { slot: model-gateway, kind: existing, label: model client, sub: timeout · one retry layer }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: context-service, kind: existing, label: context lookups, sub: templates · snapshots }
+      - { slot: tool-gateway, kind: upgraded, label: tool gateway, sub: enforcement · taint }
+      - { slot: policy-engine, kind: new, label: policy engine, sub: allow · deny · escalate }
+      - { slot: systems-of-record, kind: ext, label: Systems of record, sub: databases · APIs }
+      - { slot: approval-service, kind: new, label: approval queue, sub: human review }
+      - { slot: action-ledger, kind: new, label: action ledger, sub: intents · semantic keys }
+      - { slot: executor, kind: upgraded, label: executor, sub: exactly once · paced }
+      - { slot: egress-proxy, kind: new, label: egress proxy · allowlist }
+      - { slot: external-systems, kind: ext, label: External systems, sub: email · payments · APIs }
+      - { slot: state-store, kind: upgraded, label: state store, sub: sync checkpoints }
+      - { slot: telemetry-pipeline, kind: existing, label: telemetry, sub: OTel · redact first }
+      - { slot: release-control, kind: existing, label: kill switch, sub: feature flag }
+      - { slot: eval-platform, kind: upgraded, label: eval gate, sub: MDE · injection suite }
+    edges:
+      - { from: principal, to: orchestrator }
+      - { from: identity-broker, to: orchestrator, style: dash, to_dx: -45, label: credential }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider }
+      - { from: context-service, to: orchestrator, to_dx: -20 }
+      - { from: orchestrator, to: tool-gateway, from_dx: 15, to_dx: 15 }
+      - { from: tool-gateway, to: policy-engine, both: true }
+      - { from: tool-gateway, to: systems-of-record, from_dx: 40, label: read tools }
+      - { from: tool-gateway, to: action-ledger, from_dx: -20, to_dx: -20, label: intent }
+      - { from: reviewer, to: approval-service }
+      - { from: approval-service, to: action-ledger, both: true }
+      - { from: action-ledger, to: executor }
+      - { from: executor, to: external-systems, label: effects }
+      - { from: action-ledger, to: state-store, from_dx: -20, to_dx: -20, label: atomic }
+      - { from: eval-platform, to: release-control, style: dash }
+
+  - n: 5
+    slug: multi-agent
+    title: Multiple agents
+    rung: multi_agent
+    tier: T2–T3
+    level: L2–L3
+    when: >-
+      A concrete reason to split exists. The strongest is permission
+      separation: one agent reads untrusted content with no consequential
+      tools, another acts and never sees the raw text.
+    adds:
+      - Sub-agents that receive narrower credentials than their parent, with the actor chain recorded.
+      - Quarantined processing of untrusted content into schema-constrained output.
+      - Third-party tool servers behind the gateway, with reviewed and pinned descriptions.
+      - Long-term memory with provenance, so an injection cannot become persistent.
+    controls: [EAS-01.04, EAS-06.04, EAS-06.10, EAS-07.06, EAS-07.07, EAS-07.09, EAS-08.07]
+    next: >-
+      When several teams run Workflows on shared capacity and data, the
+      guarantees move into a platform.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: identity-broker, kind: upgraded, label: identity broker, sub: token exchange · narrow }
+      - { slot: reviewer, kind: ext, label: Reviewer, sub: approves intents }
+      - { slot: orchestrator, kind: existing, label: agent loop, sub: limits · loop detection }
+      - { slot: sub-agent, kind: new, label: reader sub-agent, sub: no tools · schema out }
+      - { slot: model-gateway, kind: existing, label: model client, sub: timeout · one retry layer }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: context-service, kind: existing, label: context lookups, sub: templates · snapshots }
+      - { slot: tool-gateway, kind: upgraded, label: tool gateway, sub: pinned descriptions }
+      - { slot: policy-engine, kind: existing, label: policy engine, sub: allow · deny · escalate }
+      - { slot: systems-of-record, kind: ext, label: Systems of record, sub: databases · APIs }
+      - { slot: mcp-servers, kind: ext, label: Tool servers, sub: third-party MCP }
+      - { slot: approval-service, kind: existing, label: approval queue, sub: human review }
+      - { slot: action-ledger, kind: existing, label: action ledger, sub: intents · semantic keys }
+      - { slot: executor, kind: existing, label: executor, sub: exactly once · paced }
+      - { slot: egress-proxy, kind: existing, label: egress proxy · allowlist }
+      - { slot: external-systems, kind: ext, label: External systems, sub: email · payments · APIs }
+      - { slot: state-store, kind: existing, label: state store, sub: sync checkpoints }
+      - { slot: memory-store, kind: new, label: memory store, sub: provenance · trust }
+      - { slot: telemetry-pipeline, kind: existing, label: telemetry, sub: OTel · redact first }
+      - { slot: release-control, kind: existing, label: kill switch, sub: feature flag }
+      - { slot: eval-platform, kind: existing, label: eval gate, sub: MDE · injection suite }
+    edges:
+      - { from: principal, to: orchestrator }
+      - { from: identity-broker, to: orchestrator, style: dash, to_dx: -45 }
+      - { from: orchestrator, to: sub-agent, route: top, label: delegate · narrower scope }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider }
+      - { from: context-service, to: orchestrator, to_dx: -20 }
+      - { from: orchestrator, to: tool-gateway, from_dx: 15, to_dx: 15 }
+      - { from: tool-gateway, to: policy-engine, both: true }
+      - { from: tool-gateway, to: systems-of-record, from_dx: 40 }
+      - { from: tool-gateway, to: mcp-servers, route: top, from_dx: 45, label: third-party tools }
+      - { from: tool-gateway, to: action-ledger, from_dx: -20, to_dx: -20 }
+      - { from: reviewer, to: approval-service }
+      - { from: approval-service, to: action-ledger, both: true }
+      - { from: action-ledger, to: executor }
+      - { from: executor, to: external-systems }
+      - { from: action-ledger, to: state-store, from_dx: -20, to_dx: -20 }
+      - { from: eval-platform, to: release-control, style: dash }
+
+  - n: 6
+    slug: platform
+    title: A shared agent platform
+    rung: any
+    tier: T3
+    level: L3
+    when: >-
+      Many Workflows, teams and tenants share model capacity, data and
+      infrastructure. Guarantees are provided once by the platform and
+      inherited by every Workflow that routes through it.
+    adds:
+      - Queue-based admission with priorities, and a model gateway with token-denominated hierarchical quotas.
+      - Release control that pins Runs to the version they started on, with canary and automatic rollback.
+      - Data-layer enforcement of the delegated identity in systems of record.
+      - A PII vault behind redaction tokens, an outcome store for cost per successful outcome and lift, and verified deletion across every store.
+    controls: [EAS-04.06, EAS-05.11, EAS-05.12, EAS-05.14, EAS-06.12, EAS-09.08, EAS-09.09, EAS-10.09, EAS-11.05, EAS-11.06, EAS-12.05, EAS-12.09]
+    next: >-
+      This is the full reference architecture. Further investment goes into
+      evidence: calibrating judges, validating proxies against outcomes, and
+      fault-injection testing.
+    boxes:
+      - { slot: principal, kind: ext, label: Principal, sub: user or system }
+      - { slot: identity-broker, kind: existing, label: identity broker, sub: token exchange · narrow }
+      - { slot: reviewer, kind: ext, label: Reviewer, sub: approves intents }
+      - { slot: pii-vault, kind: new, label: PII vault, sub: audited re-identify }
+      - { slot: scheduler, kind: new, label: scheduler, sub: queues · admission }
+      - { slot: orchestrator, kind: existing, label: agent loop, sub: limits · loop detection }
+      - { slot: sub-agent, kind: existing, label: reader sub-agent, sub: no tools · schema out }
+      - { slot: model-gateway, kind: upgraded, label: model gateway, sub: quotas · routing · cost }
+      - { slot: model-provider, kind: ext, label: Model provider, sub: hosted or self-run }
+      - { slot: context-service, kind: existing, label: context service, sub: labelled · fresh }
+      - { slot: tool-gateway, kind: existing, label: tool gateway, sub: pinned descriptions }
+      - { slot: policy-engine, kind: existing, label: policy engine, sub: allow · deny · escalate }
+      - { slot: systems-of-record, kind: upgraded, label: Systems of record, sub: row-level security }
+      - { slot: mcp-servers, kind: ext, label: Tool servers, sub: third-party MCP }
+      - { slot: approval-service, kind: existing, label: approval queue, sub: human review }
+      - { slot: action-ledger, kind: existing, label: action ledger, sub: intents · semantic keys }
+      - { slot: executor, kind: existing, label: executor, sub: exactly once · paced }
+      - { slot: egress-proxy, kind: existing, label: egress proxy · allowlist }
+      - { slot: external-systems, kind: ext, label: External systems, sub: email · payments · APIs }
+      - { slot: state-store, kind: upgraded, label: state store, sub: versioned · retained }
+      - { slot: memory-store, kind: existing, label: memory store, sub: provenance · trust }
+      - { slot: outcome-store, kind: new, label: outcome store, sub: cost per outcome · lift }
+      - { slot: telemetry-pipeline, kind: upgraded, label: telemetry, sub: tokenised · tiered }
+      - { slot: release-control, kind: upgraded, label: release control, sub: pinning · canary }
+      - { slot: eval-platform, kind: existing, label: eval gate, sub: MDE · injection suite }
+      - { slot: data-governance, kind: new, label: data governance, sub: inventory · deletion }
+    edges:
+      - { from: principal, to: scheduler }
+      - { from: identity-broker, to: scheduler, style: dash, label: credential }
+      - { from: scheduler, to: orchestrator }
+      - { from: orchestrator, to: sub-agent, route: top, label: delegate · narrower scope }
+      - { from: orchestrator, to: model-gateway }
+      - { from: model-gateway, to: model-provider }
+      - { from: context-service, to: orchestrator, to_dx: -20 }
+      - { from: orchestrator, to: tool-gateway, from_dx: 15, to_dx: 15 }
+      - { from: tool-gateway, to: policy-engine, both: true }
+      - { from: tool-gateway, to: systems-of-record, from_dx: 40 }
+      - { from: tool-gateway, to: mcp-servers, route: top, from_dx: 45 }
+      - { from: tool-gateway, to: action-ledger, from_dx: -20, to_dx: -20 }
+      - { from: reviewer, to: approval-service }
+      - { from: approval-service, to: action-ledger, both: true }
+      - { from: action-ledger, to: executor }
+      - { from: executor, to: external-systems }
+      - { from: action-ledger, to: state-store, from_dx: -20, to_dx: -20 }
+      - { from: telemetry-pipeline, to: pii-vault, style: dash, label: tokens }
+      - { from: external-systems, to: outcome-store, style: dash, label: outcome events }
+      - { from: eval-platform, to: release-control, style: dash }

@@ -1,0 +1,28 @@
+<svg class="bp stage" viewBox="0 0 952 418" role="img" aria-label="Stage 3: An agent with read-only tools" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="st-arrow-3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="bp-head"/></marker></defs>
+<g class="bp-edge">
+<path d="M132,71.0 H278" marker-end="url(#st-arrow-3)"/>
+<path d="M402,71.0 H413" marker-end="url(#st-arrow-3)"/>
+<path d="M537,71.0 H818" marker-end="url(#st-arrow-3)"/>
+<path d="M206.0,136 V116.0 H311.0 V98" marker-end="url(#st-arrow-3)"/>
+<path d="M356.0,96 V134" marker-end="url(#st-arrow-3)"/>
+<path d="M402,161.0 H548" marker-end="url(#st-arrow-3)"/>
+<path class="dash" d="M280,341.0 H269" marker-end="url(#st-arrow-3)"/>
+</g>
+<g class="bp-edge-label"><text x="362.0" y="119.0" text-anchor="start">ToolRequest</text><text x="476.0" y="156.0" text-anchor="middle">reads</text></g>
+<g class="bp-box ext-actor"><rect x="10" y="46" width="122" height="50" rx="7"/><text class="n" x="71.0" y="67" text-anchor="middle">Principal</text><text class="s" x="71.0" y="83" text-anchor="middle">user or system</text></g>
+<g class="bp-box upgraded"><rect x="280" y="46" width="122" height="50" rx="7"/><text class="n" x="341.0" y="67" text-anchor="middle">agent loop</text><text class="s" x="341.0" y="83" text-anchor="middle">limits · loop detection</text></g>
+<g class="bp-box "><rect x="415" y="46" width="122" height="50" rx="7"/><text class="n" x="476.0" y="67" text-anchor="middle">model client</text><text class="s" x="476.0" y="83" text-anchor="middle">timeout · one retry layer</text></g>
+<g class="bp-box ext-actor"><rect x="820" y="46" width="122" height="50" rx="7"/><text class="n" x="881.0" y="67" text-anchor="middle">Model provider</text><text class="s" x="881.0" y="83" text-anchor="middle">hosted or self-run</text></g>
+<g class="bp-box "><rect x="145" y="136" width="122" height="50" rx="7"/><text class="n" x="206.0" y="157" text-anchor="middle">context lookups</text><text class="s" x="206.0" y="173" text-anchor="middle">templates · snapshots</text></g>
+<g class="bp-box new"><rect x="280" y="136" width="122" height="50" rx="7"/><text class="n" x="341.0" y="157" text-anchor="middle">tool hook</text><text class="s" x="341.0" y="173" text-anchor="middle">contracts · output caps</text></g>
+<g class="bp-box ext-actor"><rect x="550" y="136" width="122" height="50" rx="7"/><text class="n" x="611.0" y="157" text-anchor="middle">Systems of record</text><text class="s" x="611.0" y="173" text-anchor="middle">read-only tools</text></g>
+<g class="bp-box "><rect x="280" y="226" width="122" height="50" rx="7"/><text class="n" x="341.0" y="247" text-anchor="middle">state store</text><text class="s" x="341.0" y="263" text-anchor="middle">checkpoints</text></g>
+<g class="bp-box "><rect x="145" y="226" width="122" height="50" rx="7"/><text class="n" x="206.0" y="247" text-anchor="middle">telemetry</text><text class="s" x="206.0" y="263" text-anchor="middle">OTel · redact first</text></g>
+<g class="bp-box "><rect x="145" y="316" width="122" height="50" rx="7"/><text class="n" x="206.0" y="337" text-anchor="middle">kill switch</text><text class="s" x="206.0" y="353" text-anchor="middle">feature flag</text></g>
+<g class="bp-box upgraded"><rect x="280" y="316" width="122" height="50" rx="7"/><text class="n" x="341.0" y="337" text-anchor="middle">eval suite</text><text class="s" x="341.0" y="353" text-anchor="middle">outcome + trajectory</text></g>
+<g class="bp-box new"><rect x="12" y="385" width="22" height="14" rx="3"/></g><text class="bp-legend" x="42" y="396">New at this stage</text>
+<g class="bp-box upgraded"><rect x="182" y="385" width="22" height="14" rx="3"/></g><text class="bp-legend" x="212" y="396">Upgraded</text>
+<g class="bp-box "><rect x="352" y="385" width="22" height="14" rx="3"/></g><text class="bp-legend" x="382" y="396">Carried forward</text>
+<g class="bp-box ext-actor"><rect x="522" y="385" width="22" height="14" rx="3"/></g><text class="bp-legend" x="552" y="396">Outside the system</text>
+</svg>

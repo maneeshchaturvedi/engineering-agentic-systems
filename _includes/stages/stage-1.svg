@@ -1,0 +1,21 @@
+<svg class="bp stage" viewBox="0 0 952 328" role="img" aria-label="Stage 1: A single model call" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="st-arrow-1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="bp-head"/></marker></defs>
+<g class="bp-edge">
+<path d="M132,71.0 H278" marker-end="url(#st-arrow-1)"/>
+<path d="M402,71.0 H413" marker-end="url(#st-arrow-1)"/>
+<path d="M537,71.0 H818" marker-end="url(#st-arrow-1)"/>
+<path class="dash" d="M280,251.0 H269" marker-end="url(#st-arrow-1)"/>
+</g>
+<g class="bp-edge-label"><text x="678.5" y="66.0" text-anchor="middle">one call</text></g>
+<g class="bp-box ext-actor"><rect x="10" y="46" width="122" height="50" rx="7"/><text class="n" x="71.0" y="67" text-anchor="middle">Principal</text><text class="s" x="71.0" y="83" text-anchor="middle">user or system</text></g>
+<g class="bp-box new"><rect x="280" y="46" width="122" height="50" rx="7"/><text class="n" x="341.0" y="67" text-anchor="middle">application</text><text class="s" x="341.0" y="83" text-anchor="middle">code · schema check</text></g>
+<g class="bp-box new"><rect x="415" y="46" width="122" height="50" rx="7"/><text class="n" x="476.0" y="67" text-anchor="middle">model client</text><text class="s" x="476.0" y="83" text-anchor="middle">timeout · one retry layer</text></g>
+<g class="bp-box ext-actor"><rect x="820" y="46" width="122" height="50" rx="7"/><text class="n" x="881.0" y="67" text-anchor="middle">Model provider</text><text class="s" x="881.0" y="83" text-anchor="middle">hosted or self-run</text></g>
+<g class="bp-box new"><rect x="145" y="136" width="122" height="50" rx="7"/><text class="n" x="206.0" y="157" text-anchor="middle">telemetry</text><text class="s" x="206.0" y="173" text-anchor="middle">OTel · redact first</text></g>
+<g class="bp-box new"><rect x="145" y="226" width="122" height="50" rx="7"/><text class="n" x="206.0" y="247" text-anchor="middle">kill switch</text><text class="s" x="206.0" y="263" text-anchor="middle">feature flag</text></g>
+<g class="bp-box new"><rect x="280" y="226" width="122" height="50" rx="7"/><text class="n" x="341.0" y="247" text-anchor="middle">eval suite</text><text class="s" x="341.0" y="263" text-anchor="middle">labelled set in CI</text></g>
+<g class="bp-box new"><rect x="12" y="295" width="22" height="14" rx="3"/></g><text class="bp-legend" x="42" y="306">New at this stage</text>
+<g class="bp-box upgraded"><rect x="182" y="295" width="22" height="14" rx="3"/></g><text class="bp-legend" x="212" y="306">Upgraded</text>
+<g class="bp-box "><rect x="352" y="295" width="22" height="14" rx="3"/></g><text class="bp-legend" x="382" y="306">Carried forward</text>
+<g class="bp-box ext-actor"><rect x="522" y="295" width="22" height="14" rx="3"/></g><text class="bp-legend" x="552" y="306">Outside the system</text>
+</svg>

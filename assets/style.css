@@ -126,3 +126,17 @@ a:hover .bp-box rect, a:focus .bp-box rect { stroke: var(--accent); stroke-width
 .bp-head { fill: var(--muted); }
 .bp-edge-label text { font-size: 10.5px; fill: var(--muted); }
 figcaption { font-family: system-ui, sans-serif; font-size: .82rem; color: var(--muted); margin-top: .6rem; }
+
+/* stage diagrams */
+.bp-box.new rect { fill: color-mix(in srgb, var(--accent) 14%, var(--bg)); stroke: var(--accent); stroke-width: 2; }
+.bp-box.upgraded rect { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 6 3; }
+.bp-wall.new rect { fill: color-mix(in srgb, var(--accent) 14%, var(--bg)); stroke: var(--accent); stroke-width: 2; }
+.bp-legend { font-size: 11px; fill: var(--muted); }
+svg.bp.stage { min-width: 720px; }
+svg.bp.stage .bp-box .n { font-size: 12px; }
+svg.bp.stage .bp-box .s { font-size: 9.5px; }
+.stage-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; font-family: system-ui, sans-serif; font-size: .8rem; margin: -.5rem 0 1rem; }
+.stage-meta span { border: 1px solid var(--rule); border-radius: 999px; padding: .15rem .6rem; color: var(--muted); }
+.stage-nav { display: flex; flex-wrap: wrap; gap: .4rem; font-family: system-ui, sans-serif; font-size: .82rem; margin: 1.5rem 0; }
+.stage-nav a { text-decoration: none; border: 1px solid var(--rule); border-radius: 6px; padding: .3rem .6rem; color: var(--fg); }
+.stage-nav a:hover { border-color: var(--accent); }

@@ -1,0 +1,444 @@
+# Technology choices per reference-architecture concern.
+# Licences checked against each project's repository on 2026-11-11. Capability notes
+# describe documented features; anything not confirmed is listed in
+# notes/technology-verification.md and kept out of the claims below.
+# model: open (OSI licence, no gated features relevant here) | open-core | source-available
+verified_on: 2026-11-11
+
+groups:
+  - id: model-access
+    title: Model access
+    components: [model-gateway]
+    introduce_at: 1
+    invest: >-
+      **Stages 1–3:** no gateway. Use the provider SDK with an explicit timeout and
+      exactly one retry layer — set every other layer's retries to zero (EAS-05.08).
+      **Stage 4:** a gateway once more than one Workflow shares keys, or you need
+      per-Run cost limits enforced in one place. **Stage 6:** hierarchical,
+      token-denominated quotas and priority classes across teams and tenants.
+    options:
+      - name: LiteLLM Proxy
+        url: https://github.com/BerriAI/litellm
+        licence: MIT core + enterprise licence
+        model: open-core
+        fit: >-
+          OpenAI-compatible proxy in front of many providers with virtual keys,
+          per key/team/user budgets and rate limits in the open-source edition, and
+          retries and fallbacks in one place.
+        satisfies: [EAS-05.04, EAS-05.08, EAS-05.13]
+        caveat: >-
+          Tag, project and per-model budgets, audit logs, most built-in guardrails
+          and SSO beyond five users require the enterprise licence. Check which
+          budget features your design depends on.
+      - name: agentgateway
+        url: https://github.com/agentgateway/agentgateway
+        licence: Apache-2.0
+        model: open
+        fit: >-
+          One proxy for model, MCP and A2A traffic (Linux Foundation). Documents
+          token rate limits, budgets in currency or tokens, cost tracking, retries
+          and OpenTelemetry — the broadest open-source coverage we confirmed.
+        satisfies: [EAS-05.04, EAS-05.08, EAS-05.11]
+        caveat: A vendor also sells an enterprise distribution; confirm features you rely on are in the open-source build.
+      - name: Agent Router (formerly Envoy AI Gateway)
+        url: https://github.com/theagentrouter/agent-router
+        licence: Apache-2.0
+        model: open
+        fit: Envoy-based and Kubernetes-native; the natural choice if Envoy or Envoy Gateway already fronts your services.
+        satisfies: [EAS-05.08]
+        caveat: Renamed in 2026 (repository and docs moved). Budget and token-limit features were not confirmed in our check.
+    build: Mapping each Run's budget onto gateway keys or headers, so the gateway enforces per-Run as well as per-key limits.
+
+  - id: tool-mediation
+    title: Tool mediation
+    components: [tool-gateway]
+    introduce_at: 3
+    invest: >-
+      **Stage 3:** an in-process hook using your framework's native interception
+      point (see the stack profiles) — no separate service. **Stage 4:** keep the
+      hook for first-party tools, but make it consult the policy engine and record
+      intents. **Stage 5:** a network gateway as soon as third-party or remote MCP
+      servers appear, so every tool call crosses one enforcement point.
+    options:
+      - name: Framework hooks
+        url: ../profiles/
+        licence: per framework
+        model: open
+        fit: >-
+          `wrap_tool_call` middleware (LangGraph), tool guardrails (OpenAI Agents
+          SDK), execution hooks (CrewAI). Zero infrastructure; right for first-party tools.
+        satisfies: [EAS-02.01, EAS-05.05, EAS-05.06, EAS-08.01]
+        caveat: Coverage gaps differ by framework — hosted tools, sub-agents and delegation tools are often outside the hook. The profiles list them.
+      - name: agentgateway
+        url: https://github.com/agentgateway/agentgateway
+        licence: Apache-2.0
+        model: open
+        fit: >-
+          MCP federation with per-tool authorization policies written in CEL, OAuth
+          for MCP including token exchange, A2A and OpenTelemetry.
+        satisfies: [EAS-02.01, EAS-07.04, EAS-07.06]
+        caveat: Policies decide on the request; taint and intent capture still need Run context from the EAS layer.
+      - name: ContextForge MCP Gateway
+        url: https://github.com/IBM/mcp-context-forge
+        licence: Apache-2.0
+        model: open
+        fit: MCP and A2A federation with OAuth and OTLP tracing; groups tools into virtual servers to scope what each agent sees.
+        satisfies: [EAS-07.04, EAS-07.06]
+        caveat: Tool restriction works through virtual servers rather than a policy language; its Helm chart marks RBAC and network policies as enterprise.
+      - name: Docker MCP Gateway
+        url: https://github.com/docker/mcp-gateway
+        licence: MIT
+        model: open
+        fit: Per-profile tool allowlists and built-in OAuth flows for teams already standardised on Docker.
+        satisfies: [EAS-07.04]
+        caveat: Oriented to Docker Desktop; OpenTelemetry support was not documented.
+    build: >-
+      Pinning tool descriptions — record a hash per tool at approval and refuse a
+      server whose descriptions change until re-reviewed (EAS-07.06). None of the
+      gateways we checked documents this.
+
+  - id: policy
+    title: Policy decisions
+    components: [policy-engine]
+    introduce_at: 4
+    invest: >-
+      **Stage 3:** plain, unit-tested code in the tool hook is a policy engine; the
+      spec does not require a policy language. **Stage 4:** adopt an engine when
+      rules multiply, change faster than the agent, or are owned by people outside
+      the team — and test policies independently of the model (EAS-04.04).
+    options:
+      - name: Open Policy Agent (OPA)
+        url: https://github.com/open-policy-agent/opa
+        licence: Apache-2.0
+        model: open
+        fit: >-
+          General-purpose decisions over structured input such as
+          `{tool, args, principal, tenant, tainted}`; one language for runtime
+          decisions and for CI checks on manifests (via conftest), with decision logs.
+        satisfies: [EAS-04.02, EAS-04.04, EAS-04.05, EAS-07.03]
+        caveat: Rego has a learning curve; keep the EAS rule library small and well tested.
+      - name: Cedar
+        url: https://github.com/cedar-policy/cedar
+        licence: Apache-2.0
+        model: open
+        fit: Authorization language designed for analysis; a good fit when policies are mostly principal/action/resource permissions.
+        satisfies: [EAS-04.02, EAS-04.04]
+        caveat: Embedded library — you supply the server and the decision log.
+      - name: Cerbos
+        url: https://github.com/cerbos/cerbos
+        licence: Apache-2.0
+        model: open-core
+        fit: Policy decision service with YAML policies and a built-in test runner; approachable for application teams.
+        satisfies: [EAS-04.02, EAS-04.04, EAS-04.05]
+        caveat: Pre-1.0 versioning; its management hub is commercial.
+      - name: OpenFGA
+        url: https://github.com/openfga/openfga
+        licence: Apache-2.0
+        model: open
+        fit: Relationship-based authorization ("can this user see this account?") for permission-aware tools and data access.
+        satisfies: [EAS-06.02, EAS-06.08]
+        caveat: Answers relationship questions, not content questions like tainted arguments — pair it with OPA or Cedar.
+    build: The EAS policy library — the lethal-combination rule, taint escalation, recipient constraints, identity-not-from-arguments.
+
+  - id: durable-execution
+    title: Durable execution and state
+    components: [orchestrator, state-store, scheduler]
+    introduce_at: 2
+    invest: >-
+      **Stage 2:** your framework's checkpointer on a durable database, as soon as
+      any step waits on a person, timer or event. **Stage 4:** synchronous
+      checkpoints for effectful Workflows, and model calls placed so their results
+      are checkpointed before anything acts on them (EAS-09.05). **Stage 6, or
+      earlier if Runs wait for days across deploys:** a durable-execution engine,
+      which gives recorded steps, durable timers and version pinning without
+      application work. Pick one owner of durability — never both.
+    options:
+      - name: Framework checkpointer (e.g. LangGraph Postgres saver)
+        url: https://pypi.org/project/langgraph-checkpoint-postgres/
+        licence: MIT
+        model: open
+        fit: Smallest step from a prototype; persists graph state per thread on Postgres.
+        satisfies: [EAS-09.02, EAS-09.03, EAS-09.04]
+        caveat: Stores state only — no durable timers, task queues or version pinning. LangGraph applies the latest code to paused threads, so pinning is application work.
+      - name: Temporal
+        url: https://github.com/temporalio/temporal
+        licence: MIT
+        model: open
+        fit: >-
+          Mature durable execution: non-deterministic calls run as activities whose
+          results are recorded, timers and signals wait without holding a worker,
+          and runs can be routed to the code version that started them. Documented
+          integrations exist for the OpenAI Agents SDK and Pydantic AI.
+        satisfies: [EAS-05.12, EAS-09.02, EAS-09.05, EAS-09.07, EAS-09.08]
+        caveat: A cluster to operate (or a managed service); workflow code must follow its determinism rules.
+      - name: DBOS Transact
+        url: https://github.com/dbos-inc/dbos-transact-py
+        licence: MIT
+        model: open
+        fit: Durable workflows as a library on Postgres — no separate cluster. Has a documented Pydantic AI integration.
+        satisfies: [EAS-09.02, EAS-09.03, EAS-09.05]
+        caveat: Postgres becomes the durability bottleneck; check version-pinning support against your deploy model.
+      - name: Hatchet
+        url: https://github.com/hatchet-dev/hatchet
+        licence: MIT
+        model: open
+        fit: Durable task queue with concurrency controls; useful when admission and fan-out limits matter most.
+        satisfies: [EAS-05.07, EAS-05.12]
+        caveat: Still 0.x; expect API changes.
+      - name: Restate, Inngest
+        url: https://github.com/restatedev/restate
+        licence: BUSL-1.1 (Restate), SSPL-1.0 (Inngest server)
+        model: source-available
+        fit: Capable durable-execution engines.
+        satisfies: []
+        caveat: Neither server is under an OSI-approved licence. Restate permits production use for your own services; check both with legal before adopting.
+    build: Recording the Workflow version on each Run when the chosen tool does not pin it.
+
+  - id: effects
+    title: Effects — ledger, executor, approval
+    components: [action-ledger, executor, approval-service]
+    introduce_at: 4
+    invest: >-
+      **Stage 2:** effects performed by code with idempotency keys derived from
+      purpose. **Stage 4:** the ledger — every effect becomes a committed intent,
+      executed by a separate worker, with approval as a state transition. This is
+      the one piece no open-source product provides with EAS semantics; build it
+      thin on infrastructure you already run.
+    options:
+      - name: PostgreSQL (transactional outbox)
+        url: https://www.postgresql.org/
+        licence: PostgreSQL
+        model: open
+        fit: >-
+          The ledger is an ordinary table partitioned by tenant, written in the same
+          transaction as the checkpoint. It doubles as the audit log, and approval
+          and dry runs are queries over it.
+        satisfies: [EAS-03.02, EAS-03.03, EAS-03.04, EAS-03.07, EAS-03.10]
+        caveat: Atomicity with the checkpoint requires the checkpoint to live in the same database, or an outbox pattern between them.
+      - name: Your durable-execution engine
+        url: "#durable-execution"
+        licence: see above
+        model: open
+        fit: Run the executor as recorded steps or activities, so a crash mid-execution resumes rather than repeats; use run or workflow IDs equal to the semantic key for deduplication where supported.
+        satisfies: [EAS-03.05, EAS-03.06]
+        caveat: Reconciliation of uncertain effects still needs each target system's delivery or status API.
+      - name: Debezium (outbox event router)
+        url: https://github.com/debezium/debezium
+        licence: Apache-2.0
+        model: open
+        fit: Streams committed intents from the outbox table to downstream executors or audit systems via change data capture.
+        satisfies: [EAS-03.05]
+        caveat: Needs Kafka Connect or Debezium Server and database log access.
+    build: The ledger schema and state machine, the executor's lease and reconciliation logic, and a small review UI over proposed intents.
+
+  - id: identity
+    title: Identity and egress
+    components: [identity-broker, egress-proxy]
+    introduce_at: 4
+    invest: >-
+      **Stage 3:** identity from the Run's context, never from tool arguments — a
+      code rule, no infrastructure. **Stage 4:** per-Run delegated credentials via
+      token exchange, workload identity instead of static secrets, and an egress
+      allowlist. **Stage 5:** credentials narrowed on every delegation, with the
+      actor chain recorded. **Stage 6:** per-Run cloud credentials and data-layer
+      enforcement.
+    options:
+      - name: Keycloak
+        url: https://github.com/keycloak/keycloak
+        licence: Apache-2.0
+        model: open
+        fit: >-
+          Standard OAuth 2.0 Token Exchange (RFC 8693) is supported and enabled by
+          default between clients of the same deployment, and the audience can be
+          narrowed on exchange.
+        satisfies: [EAS-06.03, EAS-06.05]
+        caveat: >-
+          Delegation with an actor claim (`act`) is still a preview feature, and
+          the scope parameter can widen a token unless a downscoping executor is
+          configured — essential for EAS-06.04.
+      - name: SPIFFE / SPIRE
+        url: https://github.com/spiffe/spire
+        licence: Apache-2.0
+        model: open
+        fit: Workload identity for agent runtimes and executors, removing long-lived static secrets.
+        satisfies: [EAS-06.06]
+        caveat: Federation to each cloud provider's identity system needs per-provider setup.
+      - name: Cilium
+        url: https://github.com/cilium/cilium
+        licence: Apache-2.0
+        model: open
+        fit: Kubernetes network policies with domain-based egress rules, so the runtime can reach only model providers and registered tool endpoints.
+        satisfies: [EAS-07.05]
+        caveat: Domain rules depend on DNS interception; L7 rules add an Envoy hop.
+      - name: Istio egress gateway / Squid
+        url: https://github.com/istio/istio
+        licence: Apache-2.0 (Istio), GPL-2.0 (Squid)
+        model: open
+        fit: An egress gateway in a service mesh, or a forward proxy outside Kubernetes.
+        satisfies: [EAS-07.05]
+        caveat: Any proxy only helps if direct egress is blocked at the network layer.
+    build: >-
+      Re-minting a narrow credential for the executor at execution time, so a
+      Run that waited days for approval does not depend on a long-lived token
+      (an event-storm hotspot not yet in the spec).
+
+  - id: context
+    title: Context and memory
+    components: [context-service, memory-store]
+    introduce_at: 2
+    invest: >-
+      **Stage 2:** parameterised query templates and precomputed snapshots instead
+      of ad hoc queries. **Stage 3:** per-tenant isolation in every index and
+      cache. **Stage 5:** long-term memory only with provenance on every entry.
+    options:
+      - name: MCP Toolbox for Databases
+        url: https://github.com/googleapis/mcp-toolbox
+        licence: Apache-2.0
+        model: open
+        fit: Defines database tools as parameterised SQL in configuration — the model supplies parameters, never queries.
+        satisfies: [EAS-08.02, EAS-08.03]
+        caveat: Repository renamed from genai-toolbox; templates still need row limits for EAS-08.01.
+      - name: Feast
+        url: https://github.com/feast-dev/feast
+        licence: Apache-2.0
+        model: open
+        fit: Serves precomputed features and snapshots so agents read the same figures as the rest of the product.
+        satisfies: [EAS-08.05]
+        caveat: Worth it only when batch pipelines already produce the facts agents need.
+      - name: pgvector / Qdrant
+        url: https://github.com/qdrant/qdrant
+        licence: PostgreSQL (pgvector), Apache-2.0 (Qdrant)
+        model: open
+        fit: Retrieval for unstructured knowledge, with a collection, schema or namespace per tenant.
+        satisfies: [EAS-06.07]
+        caveat: Shared collections with payload filters leak data when a filter is forgotten; prefer physical partitioning.
+      - name: mem0
+        url: https://github.com/mem0ai/mem0
+        licence: Apache-2.0
+        model: open-core
+        fit: A memory layer for agents if you want one off the shelf.
+        satisfies: []
+        caveat: Provenance and trust metadata were not confirmed; model-driven updates can overwrite facts. Add your own provenance fields.
+    build: The `as_of` and trust labels on every context item, and memory provenance.
+
+  - id: observability
+    title: Observability and privacy
+    components: [telemetry-pipeline, pii-vault]
+    introduce_at: 1
+    invest: >-
+      **Stage 1:** OpenTelemetry instrumentation with redaction in the process,
+      before any exporter — and the framework's default exporter replaced. **Stage
+      4:** tiered payload capture and metrics by version. **Stage 6:** tokenised
+      redaction backed by a vault, and per-tenant keys.
+    options:
+      - name: OpenTelemetry (SDKs, Collector) + OpenLLMetry / OpenInference
+        url: https://github.com/open-telemetry/opentelemetry-collector-contrib
+        licence: Apache-2.0
+        model: open
+        fit: The common schema; the EAS attributes extend its GenAI conventions. Instrumentation libraries cover the major frameworks.
+        satisfies: [EAS-12.01, EAS-12.03, EAS-12.04]
+        caveat: >-
+          The Collector's redaction processor is contrib-only and beta for traces —
+          and Collector-side redaction happens after data leaves the process.
+          Redact in the SDK first (EAS-12.02).
+      - name: Langfuse
+        url: https://github.com/langfuse/langfuse
+        licence: MIT core + enterprise licence
+        model: open-core
+        fit: Self-hostable LLM trace UI with datasets and evaluations, accepting OpenTelemetry.
+        satisfies: [EAS-12.01]
+        caveat: Server-side data masking, retention policies, audit logs and project-level RBAC roles are enterprise features.
+      - name: Arize Phoenix
+        url: https://github.com/Arize-ai/phoenix
+        licence: Elastic-2.0
+        model: source-available
+        fit: Trace exploration and evaluation for teams using OpenInference.
+        satisfies: [EAS-12.01]
+        caveat: Not an OSI licence; cannot be offered as a managed service.
+      - name: ClickHouse
+        url: https://github.com/ClickHouse/ClickHouse
+        licence: Apache-2.0
+        model: open
+        fit: Columnar store for trace metadata and archives; also where cost per outcome is joined.
+        satisfies: [EAS-12.03, EAS-12.08]
+        caveat: Retention and deletion are your schema design, not a product feature.
+      - name: Presidio + OpenBao
+        url: https://github.com/data-privacy-stack/presidio
+        licence: MIT (Presidio), MPL-2.0 (OpenBao)
+        model: open
+        fit: Presidio detects and anonymises personal data in text; OpenBao's encryption-as-a-service holds per-tenant keys, so a tenant can be removed by destroying its key.
+        satisfies: [EAS-12.02, EAS-12.05, EAS-12.10]
+        caveat: HashiCorp Vault is BUSL-licensed and its tokenisation (Transform) engine is enterprise-only; OpenBao has no confirmed equivalent, so the token vault is a small build.
+    build: Emitting the `eas.*` attributes, replacing framework default exporters, and the token vault.
+
+  - id: evidence
+    title: Evaluation and release
+    components: [eval-platform, release-control]
+    introduce_at: 1
+    invest: >-
+      **Stage 1:** a labelled set run in CI and a kill switch. **Stage 3:**
+      trajectory evaluation. **Stage 4:** a gate with a stated minimum detectable
+      effect and an injection suite. **Stage 6:** shadow and canary with automatic
+      rollback, and paired comparisons.
+    options:
+      - name: promptfoo / Inspect / DeepEval
+        url: https://github.com/UKGovernmentBEIS/inspect_ai
+        licence: MIT (promptfoo, Inspect), Apache-2.0 (DeepEval)
+        model: open
+        fit: Evaluation harnesses runnable in CI, with model-graded and deterministic checks. Inspect is strong for agent trajectories; promptfoo for prompt-level suites and red teaming.
+        satisfies: [EAS-10.03, EAS-10.04, EAS-10.07]
+        caveat: None computes a minimum detectable effect or paired significance for you. DeepEval sends telemetry by default.
+      - name: garak / PyRIT
+        url: https://github.com/NVIDIA/garak
+        licence: Apache-2.0 (garak), MIT (PyRIT)
+        model: open
+        fit: Prompt-injection and red-team corpora to run as a regression suite.
+        satisfies: [EAS-07.08]
+        caveat: Generic corpora; add attacks specific to your tools, channels and tool descriptions.
+      - name: OpenFeature + flagd
+        url: https://github.com/open-feature/flagd
+        licence: Apache-2.0
+        model: open
+        fit: Vendor-neutral flags for the kill switch per Workflow, version and tenant, without a deploy.
+        satisfies: [EAS-10.02]
+        caveat: flagd has no UI or audit trail; manage flags through GitOps. (Unleash is an alternative; its repository reports AGPL-3.0.)
+      - name: Argo Rollouts / Flagger
+        url: https://github.com/argoproj/argo-rollouts
+        licence: Apache-2.0
+        model: open
+        fit: Progressive delivery on Kubernetes — canary releases with metric analysis and rollback.
+        satisfies: [EAS-10.09]
+        caveat: They roll back deployments, not in-flight Runs; pair with version pinning.
+    build: The statistics on the gate — minimum detectable effect and paired McNemar tests — a few dozen lines on scipy or statsmodels.
+
+  - id: outcomes
+    title: Outcomes and data governance
+    components: [outcome-store, data-governance]
+    introduce_at: 6
+    invest: >-
+      **Stage 4:** a written success definition and complete cost per Run.
+      **Stage 6:** outcome attribution, holdouts for lift, an inventory of every
+      store holding agent data, and verified deletion.
+    options:
+      - name: dbt Core + ClickHouse or DuckDB
+        url: https://github.com/dbt-labs/dbt-core
+        licence: Apache-2.0
+        model: open
+        fit: Attribution windows, late-arriving outcomes and cost per successful outcome as versioned SQL models.
+        satisfies: [EAS-11.02, EAS-11.03, EAS-11.05]
+        caveat: Recompute recent windows as outcomes arrive; treat them as provisional.
+      - name: GrowthBook
+        url: https://github.com/growthbook/growthbook
+        licence: MIT core + enterprise licence
+        model: open-core
+        fit: Warehouse-native experiments for holdouts and lift.
+        satisfies: [EAS-11.06]
+        caveat: Several advanced statistics features live in licensed directories; confirm holdouts are in the edition you run.
+      - name: OpenMetadata / DataHub
+        url: https://github.com/open-metadata/OpenMetadata
+        licence: Apache-2.0
+        model: open
+        fit: Inventory and lineage of every store holding agent data — traces, checkpoints, memory, indexes, eval datasets.
+        satisfies: [EAS-12.07]
+        caveat: Catalogues do not delete; deletion is a workflow you run.
+    build: The deletion orchestrator — a durable workflow that fans out to every store, verifies, and records evidence.
